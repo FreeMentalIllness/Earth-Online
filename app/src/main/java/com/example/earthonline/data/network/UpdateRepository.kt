@@ -6,8 +6,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.SSLException
 
 /** 一次更新检查的结果 */
 data class UpdateInfo(
@@ -24,11 +28,12 @@ data class UpdateInfo(
 }
 
 /**
- * 应用内检查更新（v1.2.1 第 20 项）。
+ * 应用内检查更新。
  *
  * 数据源：GitHub Releases 的 latest 接口（公开只读，不需要 token）。
- * 只做「读」，不做「静默下载安装」—— 自动装 APK 既需要「未知来源」权限、也容易在
- * 用户不知情时把应用换掉，这里只负责告诉用户「有新版本」并给出去处。
+ * 本仓库只负责「读」最新版本号 / 更新说明 / APK 直链；真正的「下载 + 引导安装」
+ * 由 SettingsScreen 在用户点「下载并安装」后处理（系统 DownloadManager 下载、
+ * 下载完成广播触发安装意图，Android 8.0+ 先申请「未知来源」权限）。
  *
  * 失败路径必须是「友好提示」而不是崩溃或空白：无外网、被墙、仓库不存在、
  * 触发 GitHub 未鉴权限流（60 次/小时/IP）都会走到失败分支，统一交给调用方提示。
@@ -40,25 +45,50 @@ class UpdateRepository @Inject constructor(
 
     suspend fun checkLatest(owner: String, repo: String): Result<UpdateInfo> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
+                // 国内直连 GitHub 不稳：给整次调用设超时，避免无限挂起。
+                val timed = client.newBuilder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .callTimeout(20, TimeUnit.SECONDS)
+                    .build()
                 val url = "https://api.github.com/repos/$owner/$repo/releases/latest"
                 val request = Request.Builder()
                     .url(url)
                     .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "EarthOnline-Android")
                     .get()
                     .build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) error("更新服务器返回 ${response.code}")
+                timed.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(Exception("更新服务器返回 ${response.code}"))
+                    }
                     val body = response.body?.string().orEmpty()
-                    if (body.isBlank()) error("更新服务器返回空内容")
+                    if (body.isBlank()) {
+                        return@withContext Result.failure(Exception("更新服务器返回空内容"))
+                    }
                     val json = JSONObject(body)
-                    UpdateInfo(
+                    val info = UpdateInfo(
                         version = json.optString("tag_name").removePrefix("v").trim(),
                         releaseUrl = json.optString("html_url"),
                         notes = json.optString("body").trim().take(400),
                         apkUrl = pickApk(json.optJSONArray("assets"))
                     )
+                    if (info.version.isBlank()) {
+                        return@withContext Result.failure(Exception("更新服务器未返回版本号"))
+                    }
+                    Result.success(info)
                 }
+            } catch (e: Exception) {
+                // 超时 / 断网 / 被墙 / TLS 握手失败 → 统一人话提示，绝不抛到 UI 造成闪退。
+                val msg = when (e) {
+                    is SocketTimeoutException,
+                    is UnknownHostException,
+                    is SSLException,
+                    is java.io.IOException -> "网络异常，请检查网络或代理"
+                    else -> e.message ?: "无法连接更新服务器"
+                }
+                Result.failure(Exception(msg))
             }
         }
 

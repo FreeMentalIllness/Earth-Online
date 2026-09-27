@@ -4,6 +4,8 @@
 
     <!-- AI 对话 / WebDAV 同步 / 高德地图 需要网络 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- v1.0.1：检查更新后下载 APK 并引导安装，Android 8.0+ 需要此权限才能装「未知来源」应用 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 足迹地图定位（运行时按权限请求） -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

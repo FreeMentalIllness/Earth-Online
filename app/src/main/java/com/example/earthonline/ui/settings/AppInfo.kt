@@ -47,13 +47,15 @@ object AppInfo {
         "数据存储" to "本机 Room 数据库"
     )
 
-    /* ---------------- v1.2.1：应用内检查更新 ---------------- */
+    /* ---------------- 应用内检查更新 ---------------- */
     /**
      * 发布 Release 的 GitHub 仓库（owner / repo）。
-     * 更新检查只读 public 的 releases/latest 接口；换仓库时改这两个常量即可。
+     * 更新检查只读 public 的 releases/latest 接口：
+     *   https://api.github.com/repos/FreeMentalIllness/Earth-Online/releases/latest
+     * 换仓库时改这两个常量即可；APK 直链取 assets[0].browser_download_url。
      */
-    const val repoOwner = "earthonline"
-    const val repoName = "earth-online"
+    const val repoOwner = "FreeMentalIllness"
+    const val repoName = "Earth-Online"
     const val releasePage = "https://github.com/$repoOwner/$repoName/releases"
 
     /**

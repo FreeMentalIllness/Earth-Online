@@ -9,6 +9,7 @@ import com.example.earthonline.data.network.AiConfig
 import com.example.earthonline.data.network.WebDavConfig
 import com.example.earthonline.data.network.UpdateRepository
 import com.example.earthonline.data.network.WebDavService
+import com.example.earthonline.BuildConfig
 import com.example.earthonline.data.sync.CloudSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -109,7 +110,7 @@ class SettingsViewModel @Inject constructor(
     suspend fun checkUpdate(): Result<UpdateCheck> {
         val info = updateRepo.checkLatest(AppInfo.repoOwner, AppInfo.repoName)
             .getOrElse { return Result.failure(it) }
-        val hasUpdate = info.version.isNotBlank() && updateRepo.isNewer(info.version, AppInfo.version)
+        val hasUpdate = info.version.isNotBlank() && updateRepo.isNewer(info.version, BuildConfig.VERSION_NAME)
         return Result.success(
             UpdateCheck(
                 latest = info.version.ifBlank { AppInfo.version },

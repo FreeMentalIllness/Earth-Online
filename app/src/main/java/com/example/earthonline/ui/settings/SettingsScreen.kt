@@ -34,8 +34,16 @@ import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
 import android.Manifest
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import kotlin.text.Charsets
@@ -73,6 +81,86 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateAvailable by remember { mutableStateOf<UpdateCheck?>(null) }
+
+    // v1.0.1：检查更新 → 下载并安装（系统下载器 + 未知来源权限）。
+    //   有 APK 直链：DownloadManager 下载到应用私有下载目录，下载完成广播触发安装意图；
+    //   Android 8.0+ 需「安装未知应用」权限，未授予时先跳系统设置页授权，回来再下。
+    //   无直链（只有 Release 页）：退化为打开浏览器，沿用 UrlOpener 的容错。
+    val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    val lastDownloadId = remember { mutableStateOf(-1L) }
+    var pendingApkUrl by remember { mutableStateOf<String?>(null) }
+
+    fun startApkDownload(url: String) {
+        val req = DownloadManager.Request(Uri.parse(url)).apply {
+            setTitle("地球Online 更新")
+            setDescription("正在下载安装包…")
+            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "earth-online-update.apk")
+            setAllowedOverMetered(true)
+            setAllowedOverRoaming(true)
+        }
+        lastDownloadId.value = downloadManager.enqueue(req)
+        scope.launch { snackbar.showSnackbar("开始下载更新，完成后自动提示安装") }
+    }
+
+    fun installDownloadedApk(id: Long) {
+        downloadManager.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+            if (!c.moveToFirst()) return@use
+            val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            val uriStr = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
+            if (status == DownloadManager.STATUS_SUCCESSFUL && !uriStr.isNullOrBlank()) {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.parse(uriStr), "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching { context.startActivity(intent) }
+                    .onFailure { scope.launch { snackbar.showSnackbar("无法启动安装，请手动前往 Release 页面") } }
+            } else {
+                scope.launch { snackbar.showSnackbar("下载失败，请手动前往 Release 页面") }
+            }
+        }
+    }
+
+    val installPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            context.packageManager.canRequestPackageInstalls()
+        val url = pendingApkUrl
+        pendingApkUrl = null
+        if (canInstall && url != null) startApkDownload(url)
+        else scope.launch { snackbar.showSnackbar("未授权「安装未知应用」，已改为打开 Release 页面") }
+    }
+
+    fun beginInstallFlow(apkUrl: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            pendingApkUrl = apkUrl
+            installPermLauncher.launch(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.fromParts("package", context.packageName, null)
+                )
+            )
+        } else {
+            startApkDownload(apkUrl)
+        }
+    }
+
+    // 下载完成的系统广播 → 触发安装（仅匹配我们这次 enqueue 的 id）
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+                if (id == lastDownloadId.value) installDownloadedApk(id)
+            }
+        }
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
 
     var showAiConfig by remember { mutableStateOf(false) }
     var showDavConfig by remember { mutableStateOf(false) }
@@ -601,6 +689,7 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
     }
 
     updateAvailable?.let { up ->
+        val isApk = up.url.endsWith(".apk", ignoreCase = true)
         AnimatedAlertDialog(
             onDismissRequest = { updateAvailable = null },
             title = { Text("发现新版本 v${up.latest}") },
@@ -619,7 +708,8 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
                         )
                     }
                     Text(
-                        "下载与安装由浏览器完成，安装完成后覆盖安装即可，数据不会丢失。",
+                        if (isApk) "下载将通过系统下载器进行，完成后自动提示安装；Android 8.0 及以上首次安装需授予「安装未知应用」权限。覆盖安装不会丢失本地数据。"
+                        else "未找到 APK 直链，将打开 Release 页面手动下载。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -628,12 +718,12 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
             confirmButton = {
                 TextButton(onClick = {
                     updateAvailable = null
-                    // v1.0.1：不再裸调 startActivity —— 无浏览器时 openUrlInBrowser 只弹提示，
-                    // 不会抛 ActivityNotFoundException 把页面带崩。
-                    if (!openUrlInBrowser(context, up.url, noBrowserMessage = "未找到可用的浏览器，请手动访问 Release 页面")) {
+                    if (isApk) {
+                        beginInstallFlow(up.url)
+                    } else if (!openUrlInBrowser(context, up.url, noBrowserMessage = "未找到可用的浏览器，请手动访问 Release 页面")) {
                         scope.launch { snackbar.showSnackbar("未找到可用的浏览器") }
                     }
-                }) { Text("前往更新") }
+                }) { Text(if (isApk) "下载并安装" else "前往更新") }
             },
             dismissButton = { TextButton(onClick = { updateAvailable = null }) { Text("稍后") } }
         )
