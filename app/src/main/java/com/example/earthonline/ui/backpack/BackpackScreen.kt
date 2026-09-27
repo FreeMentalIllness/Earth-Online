@@ -1,0 +1,461 @@
+package com.example.earthonline.ui.backpack
+
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.earthonline.data.local.entity.BagCategoryEntity
+import com.example.earthonline.data.local.entity.CollectionEntity
+import com.example.earthonline.data.local.entity.ItemEntity
+import com.example.earthonline.data.local.entity.SCOPE_COLLECTION
+import com.example.earthonline.data.local.entity.SCOPE_ITEM
+import com.example.earthonline.data.model.CollectionFileMeta
+import com.example.earthonline.ui.components.AnimatedAlertDialog
+import com.example.earthonline.ui.components.EmptyHint
+import com.example.earthonline.ui.components.EmptyState
+import com.example.earthonline.ui.components.MoreMenuActions
+import com.example.earthonline.ui.components.SettingsIconButton
+import com.example.earthonline.ui.components.UiDimens
+import com.example.earthonline.ui.theme.AmberPrimary
+import kotlinx.serialization.json.Json
+
+@Composable
+fun BackpackRoute(
+    startTab: Int = 0,
+    moreActions: MoreMenuActions,
+    vm: BackpackViewModel = hiltViewModel()
+) {
+    BackpackScreen(vm, moreActions, startTab)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BackpackScreen(
+    vm: BackpackViewModel,
+    moreActions: MoreMenuActions,
+    startTab: Int = 0
+) {
+    var tab by remember { mutableStateOf(startTab) }
+    val items by vm.items.collectAsStateWithLifecycle()
+    val collections by vm.collections.collectAsStateWithLifecycle()
+    val itemCats by vm.itemCategories.collectAsStateWithLifecycle()
+    val collectionCats by vm.collectionCategories.collectAsStateWithLifecycle()
+    val catError by vm.categoryError.collectAsStateWithLifecycle()
+    var showItem by remember { mutableStateOf(false) }
+    var showCollection by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text("背包") },
+                actions = { SettingsIconButton(actions = moreActions) }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { if (tab == 0) showItem = true else showCollection = true },
+                containerColor = AmberPrimary
+            ) { Icon(Icons.Filled.Add, contentDescription = "新增") }
+        }
+    ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            TabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("物品") })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("收藏") })
+            }
+            if (tab == 0) {
+                ItemsPane(
+                    items = items,
+                    categories = itemCats,
+                    vm = vm,
+                    // 空状态里的「添加第一件物品」要能打开父级的新增对话框
+                    onAddItem = { showItem = true },
+                    onManageCategories = { showCategoryManager = true }
+                )
+            } else {
+                CollectionsPane(
+                    collections = collections,
+                    categories = collectionCats,
+                    vm = vm,
+                    context = context,
+                    onAddCollection = { showCollection = true },
+                    onManageCategories = { showCategoryManager = true }
+                )
+            }
+        }
+    }
+
+    if (showItem) {
+        ItemDialog(
+            categories = itemCats,
+            onCreateCategory = { vm.addCategory(SCOPE_ITEM, it) },
+            onDismiss = { showItem = false },
+            onSubmit = { n, ty, d, c -> vm.addItem(n, ty, d, c); showItem = false }
+        )
+    }
+    if (showCollection) {
+        CollectionDialog(
+            categories = collectionCats,
+            onCreateCategory = { vm.addCategory(SCOPE_COLLECTION, it) },
+            onDismiss = { showCollection = false },
+            onSubmit = { t, n, c, uri -> vm.addCollection(t, n, c, uri); showCollection = false }
+        )
+    }
+    if (showCategoryManager) {
+        val scope = if (tab == 0) SCOPE_ITEM else SCOPE_COLLECTION
+        val cats = if (tab == 0) itemCats else collectionCats
+        CategoryManagerDialog(
+            title = if (tab == 0) "物品分类管理" else "收藏分类管理",
+            categories = cats,
+            error = catError,
+            onDismiss = { showCategoryManager = false; vm.clearCategoryError() },
+            onAdd = { vm.addCategory(scope, it) },
+            onRename = vm::renameCategory,
+            onDelete = vm::deleteCategory
+        )
+    }
+}
+
+// ------------------------------ 物品 ------------------------------
+
+@Composable
+private fun ItemsPane(
+    items: List<ItemEntity>,
+    categories: List<BagCategoryEntity>,
+    vm: BackpackViewModel,
+    onAddItem: () -> Unit,
+    onManageCategories: () -> Unit
+) {
+    // null=全部，""=未分类，其它=分类名
+    var cat by remember { mutableStateOf<String?>(null) }
+    val filtered = remember(items, cat) {
+        when (cat) {
+            null -> items
+            "" -> items.filter { it.category.isNullOrBlank() }
+            else -> items.filter { it.category == cat }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        CategoryFilterRow(
+            categories = categories,
+            selected = cat,
+            onSelect = { cat = it },
+            onManage = onManageCategories
+        )
+        if (filtered.isEmpty()) {
+            if (items.isEmpty()) {
+                EmptyState(
+                    emoji = "🎒",
+                    title = "背包还是空的",
+                    message = "把你拥有的、想留下的东西登记进来：一台相机、一本读到一半的书、一张还没用的券。" +
+                        "以后翻背包就像翻自己的人生清单。",
+                    actionLabel = "添加第一件物品",
+                    onAction = onAddItem
+                )
+            } else {
+                EmptyHint("该分类下暂无物品", emoji = "🎒")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = UiDimens.ListPad),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(
+                    filtered,
+                    key = { it.id },
+                    contentType = { "itemCard" }
+                ) { ItemCard(it, vm::deleteItem) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItemCard(item: ItemEntity, onDelete: (String) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.ItemRadius)) {
+        Row(
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.name, style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(onClick = {}, label = { Text(if (item.type == "virtual") "虚拟" else "实物") })
+                    item.category?.takeIf { it.isNotBlank() }?.let {
+                        AssistChip(onClick = {}, label = { Text(it) })
+                    }
+                }
+                if (!item.description.isNullOrBlank()) {
+                    Text(item.description!!, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            IconButton(onClick = { onDelete(item.id) }) { Icon(Icons.Filled.Delete, contentDescription = "删除") }
+        }
+    }
+}
+
+// ------------------------------ 收藏 ------------------------------
+
+@Composable
+private fun CollectionsPane(
+    collections: List<CollectionEntity>,
+    categories: List<BagCategoryEntity>,
+    vm: BackpackViewModel,
+    context: Context,
+    onAddCollection: () -> Unit,
+    onManageCategories: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var cat by remember { mutableStateOf<String?>(null) }
+    val filtered = remember(collections, query, cat) {
+        collections.filter { c ->
+            val matchCat = when (cat) {
+                null -> true
+                "" -> c.category.isNullOrBlank()
+                else -> c.category == cat
+            }
+            val matchQuery = query.isBlank() ||
+                    c.title.contains(query, true) || (c.note ?: "").contains(query, true)
+            matchCat && matchQuery
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query, onValueChange = { query = it },
+            placeholder = { Text("搜索标题 / 备注") },
+            leadingIcon = { Icon(Icons.Filled.Search, null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+                .padding(UiDimens.ListPad, UiDimens.ListPad, UiDimens.ListPad, 0.dp)
+        )
+        CategoryFilterRow(
+            categories = categories,
+            selected = cat,
+            onSelect = { cat = it },
+            onManage = onManageCategories
+        )
+        if (filtered.isEmpty()) {
+            if (collections.isEmpty()) {
+                EmptyState(
+                    emoji = "📚",
+                    title = "收藏夹空着呢",
+                    message = "值得回看的东西都往这儿放：一篇好文章、一段聊天记录、一张截图，还能附上原文件。",
+                    actionLabel = "添加第一条收藏",
+                    onAction = onAddCollection
+                )
+            } else {
+                EmptyHint("没有匹配的收藏", emoji = "🔍")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = UiDimens.ListPad),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(
+                    filtered,
+                    key = { it.id },
+                    contentType = { "collectionCard" }
+                ) { CollectionCard(it, vm, context) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionCard(c: CollectionEntity, vm: BackpackViewModel, context: Context) {
+    val meta = remember(c.fileMetaJson) {
+        c.fileMetaJson?.let { runCatching { Json.decodeFromString(CollectionFileMeta.serializer(), it) }.getOrNull() }
+    }
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.ItemRadius)) {
+        Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(c.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = { vm.deleteCollection(c.id) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "删除")
+                }
+            }
+            c.category?.takeIf { it.isNotBlank() }?.let {
+                AssistChip(onClick = {}, label = { Text(it) })
+            }
+            if (!c.note.isNullOrBlank()) {
+                Text(c.note!!, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (meta != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Filled.Description, null, Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(meta.name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text(formatSize(meta.size), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    IconButton(onClick = {
+                        val intent = vm.getOpenIntent(c)
+                        if (intent != null) {
+                            try { context.startActivity(intent) }
+                            catch (e: Exception) {
+                                Toast.makeText(context, "没有可打开此文件的应用", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+                        }
+                    }) { Icon(Icons.Filled.OpenInNew, contentDescription = "打开") }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------ 对话框 ------------------------------
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ItemDialog(
+    categories: List<BagCategoryEntity>,
+    onCreateCategory: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSubmit: (name: String, type: String, desc: String?, category: String?) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf("physical") }
+    var desc by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf<String?>(null) }
+    AnimatedAlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onSubmit(name.trim(), type, desc.takeIf { it.isNotBlank() }, category)
+                    }
+                },
+                enabled = name.isNotBlank()
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } },
+        title = { Text("新增物品") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = type == "physical", onClick = { type = "physical" }, label = { Text("实物") })
+                    FilterChip(selected = type == "virtual", onClick = { type = "virtual" }, label = { Text("虚拟") })
+                }
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("描述") },
+                    modifier = Modifier.fillMaxWidth())
+                CategoryPicker(
+                    categories = categories,
+                    selected = category,
+                    onSelect = { category = it },
+                    onCreate = onCreateCategory
+                )
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CollectionDialog(
+    categories: List<BagCategoryEntity>,
+    onCreateCategory: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSubmit: (title: String, note: String?, category: String?, fileUri: Uri?) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf<String?>(null) }
+    var fileUri by remember { mutableStateOf<Uri?>(null) }
+    var fileName by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            fileUri = it
+            fileName = fileNameFromUri(context, it)
+        }
+    }
+    AnimatedAlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onSubmit(title.trim(), note.takeIf { it.isNotBlank() }, category, fileUri)
+                    }
+                },
+                enabled = title.isNotBlank()
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } },
+        title = { Text("新增收藏") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("标题") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("备注") },
+                    modifier = Modifier.fillMaxWidth())
+                CategoryPicker(
+                    categories = categories,
+                    selected = category,
+                    onSelect = { category = it },
+                    onCreate = onCreateCategory
+                )
+                OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.AttachFile, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(fileName ?: "选择文件附件（可选）")
+                }
+            }
+        }
+    )
+}
+
+private fun fileNameFromUri(context: Context, uri: Uri): String? {
+    val c = context.contentResolver.query(uri, null, null, null, null)
+    c?.use {
+        val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (it.moveToFirst() && idx >= 0) return it.getString(idx)
+    }
+    return null
+}
+
+private fun formatSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    }
+}

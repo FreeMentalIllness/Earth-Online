@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.0.0：系统启动图的**透明占位图标**。
+     冷启动要的是「纯白一屏 + App 内部开屏动画」，系统那一层不放任何图标 ——
+     一旦系统画了图标、Compose 又画一遍，交接时就会出现两个地球（重影 / 缩放跳变）。
+     透明占位是显式声明：不是忘了设，而是刻意不放。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+</shape>

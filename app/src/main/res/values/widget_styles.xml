@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件入口的公共样式。
+     RemoteViews 无法用 Material 组件，这些属性只能在 XML 里写死；
+     抽成 style 是为了让四个入口只写一次尺寸，避免逐个改漏。 -->
+<resources>
+
+    <style name="WidgetEntry">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingTop">6dp</item>
+        <item name="android:paddingBottom">6dp</item>
+        <item name="android:background">@drawable/widget_entry_bg</item>
+    </style>
+
+    <style name="WidgetEntryLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textColor">@color/widget_text_sub</item>
+        <item name="android:textSize">10sp</item>
+    </style>
+</resources>

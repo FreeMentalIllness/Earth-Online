@@ -1,0 +1,20 @@
+<resources>
+    <!-- Android 12+ SplashScreen：先显示启动图，再切回主主题 -->
+    <style name="Theme.EarthOnline.Splash" parent="Theme.SplashScreen">
+        <!-- v1.0.0：与 Compose 开屏页（SplashOverlay）同底色 = #FFFFFF 纯白。
+             系统这一层不做任何品牌表达，只保证「进程起来就有干净的一屏」。 -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- v1.2.2：Splash 主题自己也要设 windowBackground。
+             系统画「启动窗口」时用的是本主题的 windowBackground，而不是 postSplashScreenTheme；
+             不设就会继承 Theme.SplashScreen 的默认色 —— 冷启动最前面那一帧会露出不同的底色。 -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <!-- v1.0.0：**透明占位，不放图标**。
+             系统层只负责「进程起来到首帧之间给一屏纯白」，品牌动画由 Compose 开屏页演。
+             若这里放图标，撤除启动图时会先看到系统图标（孤零零一个地球）再看到 Compose 的
+             带光晕版本 —— 这正是之前「先闪一个白底地球」的观感来源。 -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <!-- 图标不做动画，这里只用于告诉库「启动图最长的预期停留」，配合 setKeepOnScreenCondition 使用 -->
+        <item name="windowSplashScreenAnimationDuration">500</item>
+        <item name="postSplashScreenTheme">@style/Theme.EarthOnline</item>
+    </style>
+</resources>

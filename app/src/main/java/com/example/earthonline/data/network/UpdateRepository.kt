@@ -1,0 +1,97 @@
+package com.example.earthonline.data.network
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/** 一次更新检查的结果 */
+data class UpdateInfo(
+    /** 最新版本号（已去掉 v 前缀，例如 1.2.2） */
+    val version: String,
+    /** Release 页面地址（浏览器打开） */
+    val releaseUrl: String,
+    /** 更新说明（GitHub Release body，截断到 400 字，避免弹窗变成一堵墙） */
+    val notes: String,
+    /** 直链 APK 地址（assets 里第一个 .apk；没有则为 null，只能跳页面下载） */
+    val apkUrl: String?
+) {
+    val hasUpdate: Boolean get() = version.isNotBlank()
+}
+
+/**
+ * 应用内检查更新（v1.2.1 第 20 项）。
+ *
+ * 数据源：GitHub Releases 的 latest 接口（公开只读，不需要 token）。
+ * 只做「读」，不做「静默下载安装」—— 自动装 APK 既需要「未知来源」权限、也容易在
+ * 用户不知情时把应用换掉，这里只负责告诉用户「有新版本」并给出去处。
+ *
+ * 失败路径必须是「友好提示」而不是崩溃或空白：无外网、被墙、仓库不存在、
+ * 触发 GitHub 未鉴权限流（60 次/小时/IP）都会走到失败分支，统一交给调用方提示。
+ */
+@Singleton
+class UpdateRepository @Inject constructor(
+    private val client: OkHttpClient
+) {
+
+    suspend fun checkLatest(owner: String, repo: String): Result<UpdateInfo> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val url = "https://api.github.com/repos/$owner/$repo/releases/latest"
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.github+json")
+                    .get()
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) error("更新服务器返回 ${response.code}")
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) error("更新服务器返回空内容")
+                    val json = JSONObject(body)
+                    UpdateInfo(
+                        version = json.optString("tag_name").removePrefix("v").trim(),
+                        releaseUrl = json.optString("html_url"),
+                        notes = json.optString("body").trim().take(400),
+                        apkUrl = pickApk(json.optJSONArray("assets"))
+                    )
+                }
+            }
+        }
+
+    /** assets 里挑第一个 .apk 直链（Release 里可能同时有 apk / json / 源码包） */
+    private fun pickApk(assets: JSONArray?): String? {
+        if (assets == null) return null
+        for (i in 0 until assets.length()) {
+            val a = assets.optJSONObject(i) ?: continue
+            val name = a.optString("name")
+            if (name.endsWith(".apk", ignoreCase = true)) {
+                return a.optString("browser_download_url").takeIf { it.isNotBlank() }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 版本号比较：按 . 分段逐位比数字。
+     * 不能直接字符串比较 —— "1.10.0" < "1.9.0" 在字典序下是错的。
+     * 非数字段（如 -beta）只取其前导数字，解析不了就当 0，保证比较永远有结果、不抛异常。
+     */
+    fun isNewer(latest: String, current: String): Boolean {
+        val a = segments(latest)
+        val b = segments(current)
+        val n = maxOf(a.size, b.size)
+        for (i in 0 until n) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
+    }
+
+    private fun segments(v: String): List<Int> =
+        v.split('.').map { part -> part.trim().takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+}

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 总览小组件布局。
+     RemoteViews 只支持 FrameLayout/LinearLayout/RelativeLayout/GridLayout 与
+     少数基础控件（TextView/ImageView/ProgressBar/Chronograph/Adapter 类），
+     所以这里没有 Material 组件、没有 ConstraintLayout，圆角一律靠 drawable。
+     根布局用 match_parent + center_vertical：不同桌面的格子高度不一致（4x2 从 130dp 到 190dp 都有），
+     内容垂直居中可以兼容，不会出现"上半截空一大块"。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp"
+    android:background="@drawable/widget_bg">
+
+    <!-- 头部：头像 + 名字 + 等级 + 经验条 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp">
+
+            <ImageView
+                android:id="@+id/widget_avatar"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:contentDescription="@string/widget_avatar_desc" />
+
+            <!-- 未上传头像时的兜底：直接画预设 emoji（RemoteViews 里 ImageView 无法做圆形裁剪，
+                 圆形头像是渲染阶段用 Canvas 切好的 Bitmap，见 WidgetRenderer.roundAvatar） -->
+            <TextView
+                android:id="@+id/widget_avatar_emoji"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:textSize="24sp"
+                android:text="🌍"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text="@string/widget_default_name"
+                android:textColor="@color/widget_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/widget_level"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/widget_text_sub"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/widget_xp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:textColor="@color/widget_accent"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/widget_xp_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="5dp"
+                android:layout_marginTop="4dp"
+                android:max="100"
+                android:minHeight="0dp"
+                android:progressDrawable="@drawable/widget_progress" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 四个入口：任务 / 背包 / 成就 / 数据 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/widget_entry_tasks"
+            style="@style/WidgetEntry">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✅"
+                android:textSize="16sp" />
+            <TextView
+                style="@style/WidgetEntryLabel"
+                android:text="@string/widget_entry_tasks" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_entry_backpack"
+            style="@style/WidgetEntry">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎒"
+                android:textSize="16sp" />
+            <TextView
+                style="@style/WidgetEntryLabel"
+                android:text="@string/widget_entry_backpack" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_entry_achievements"
+            style="@style/WidgetEntry">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🏆"
+                android:textSize="16sp" />
+            <TextView
+                style="@style/WidgetEntryLabel"
+                android:text="@string/widget_entry_achievements" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_entry_data"
+            style="@style/WidgetEntry">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📊"
+                android:textSize="16sp" />
+            <TextView
+                style="@style/WidgetEntryLabel"
+                android:text="@string/widget_entry_data" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

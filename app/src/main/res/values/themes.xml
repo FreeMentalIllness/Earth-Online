@@ -1,0 +1,28 @@
+<resources>
+    <!-- 主主题（Compose 用 Material3 自管配色，Android 主题仅负责无 ActionBar + 状态栏/导航栏颜色） -->
+    <style name="Theme.EarthOnline" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- v1.2.2：系统启动图撤掉 → Compose 画出首帧之间，露出的是窗口背景。
+             不设的话默认随主题（浅色白 / 深色黑），交接那一帧会「闪」一下。
+             设成开屏底色，与系统启动图、Compose 开屏页三者同色，看起来就是连续的一屏。 -->
+        <!-- v1.0.0：纯白。与系统启动图、Compose 开屏页同色（见 colors.xml 注释） -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!-- 预 API 31 回退（minSdk 24）：core-splashscreen 向下兼容，必须继承 Theme.SplashScreen 才能正常显示并回切主主题 -->
+    <style name="Theme.EarthOnline.Splash" parent="Theme.SplashScreen">
+        <!-- 底色与 Compose 开屏页（SplashOverlay）一致：#FFFFFF 纯白 -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- v1.2.2：Splash 主题自己也要设 windowBackground。
+             系统画「启动窗口」时用的是本主题的 windowBackground，而不是 postSplashScreenTheme；
+             不设就会继承 Theme.SplashScreen 的默认色 —— 冷启动最前面那一帧（几十一百毫秒）
+             会露出与开屏页不同的底色，这正是割裂感的来源之一。 -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <!-- v1.0.0：不画图标（透明占位）。系统层只给一屏纯白，
+             地球 / 光晕 / 应用名全部交给 App 内的 Compose 开屏页，避免两段各画一遍导致重影。 -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="postSplashScreenTheme">@style/Theme.EarthOnline</item>
+    </style>
+</resources>

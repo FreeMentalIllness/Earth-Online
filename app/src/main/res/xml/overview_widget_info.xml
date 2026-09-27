@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 地球Online 总览小组件（桌面 4x2）
+     省电要点：updatePeriodMillis=0 —— 不让系统按固定周期唤醒进程。
+     刷新改为三条驱动：① 应用内数据变更（Room 表监听，防抖 3s）；
+     ② 每天一次的 WorkManager 周期任务（等级/天数每天都变，但只每天唤一次）；
+     ③ 系统事件（添加小组件、开机、应用升级）由 onUpdate 兜底。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="130dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_overview"
+    android:previewLayout="@layout/widget_overview"
+    android:previewImage="@mipmap/ic_launcher"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable"
+    android:description="@string/widget_overview_desc" />

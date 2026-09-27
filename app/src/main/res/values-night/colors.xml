@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色模式下的小组件配色。
+     RemoteViews 不走 Compose 主题（MaterialTheme.colorScheme 对它无效），
+     深浅两套只能靠资源限定符区分；漏了这份的话深色桌面上就是"白底黑字"刺眼块。 -->
+<resources>
+    <color name="widget_bg">#22201D</color>
+    <color name="widget_text">#F3EDE4</color>
+    <color name="widget_text_sub">#A9A196</color>
+    <color name="widget_accent">#D4A373</color>
+    <color name="widget_stroke">#3A3630</color>
+    <color name="widget_track">#3A3630</color>
+    <color name="widget_entry_bg">#2C2925</color>
+</resources>

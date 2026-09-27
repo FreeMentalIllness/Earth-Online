@@ -1,0 +1,28 @@
+<resources>
+    <!-- 对应 HTML 设计基调：纸感米白背景 + 暖琥珀主色 -->
+    <color name="background_light">#F8F6F2</color>
+    <color name="amber_primary">#D4A373</color>
+    <color name="launcher_bg">#D4A373</color>
+    <color name="background_dark">#1A1A1A</color>
+
+    <!-- v1.0.0：开屏专用色 = **纯白**。
+         系统启动图（XML）、窗口背景、Compose 开屏页（SplashOverlay）三处必须是同一个值，
+         否则冷启动就会看到一次「换底色」。
+         这里刻意选纯白：系统层只负责「立刻给出一屏干净的底」，
+         品牌动画（地球 + 光晕 + 应用名）全部由 App 内的 Compose 开屏页来演，
+         两段之间的交接就只有「元素淡入」，没有任何底色 / 图标位移的跳变。 -->
+    <color name="splash_background">#FFFFFF</color>
+    <!-- 开屏底色固定为暖米色（不跟随深色主题），所以文字也必须固定深色，
+         不能用 colorScheme.onBackground（深色模式下那是浅色字，在米色底上等于隐形）。 -->
+    <color name="splash_text">#1E1A16</color>
+    <color name="splash_text_sub">#7A7268</color>
+
+    <!-- v1.0.0：桌面小组件配色（RemoteViews 不读 Compose 主题，深浅两套靠 values-night 覆盖） -->
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_text">#1E1A16</color>
+    <color name="widget_text_sub">#7A7268</color>
+    <color name="widget_accent">#D4A373</color>
+    <color name="widget_stroke">#E8E2DA</color>
+    <color name="widget_track">#EDE6DC</color>
+    <color name="widget_entry_bg">#F8F6F2</color>
+</resources>

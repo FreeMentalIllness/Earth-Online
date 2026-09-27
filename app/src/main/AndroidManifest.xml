@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- AI 对话 / WebDAV 同步 / 高德地图 需要网络 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 足迹地图定位（运行时按权限请求） -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 世界日志语音输入（SpeechRecognizer 需要麦克风） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 高德地图 / 语音识别服务需要网络 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 到期提醒通知（Android 13+ 运行时申请；低版本安装即授予） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 开机后重新调度每日提醒闹钟 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- v1.0.0：分享卡片「保存到相册」。Android 10+ 走 MediaStore 无需权限，
+         仅 9 及以下需要写外存，故限定 maxSdkVersion=28（避免在高版本上多要一个权限）。 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- v1.0.1：外部链接跳转（记账下载 / 检查更新 / 语音输入）需要「看得见」系统里的浏览器。
+         Android 11（API 30）起有 **包可见性（package visibility）** 限制：
+         未在此声明的应用，PackageManager.resolveActivity() / queryIntentActivities() 会当它不存在、
+         直接返回 null —— 于是「明明装了 Chrome 却判断成没有浏览器」。
+         ⚠️ 关键区分：startActivity() 本身**不受**包可见性限制（系统 resolver 照常工作），
+         只有「查询类」API 受影响。所以：
+           - 跳转能力不依赖这段声明；
+           - 但想预先判断「有没有浏览器、要不要给提示」就必须靠它。
+         这里把 http / https 浏览意图与语音识别服务都声明出来。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".EarthOnlineApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.EarthOnline.Splash"
+        tools:targetApi="31">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.EarthOnline.Splash"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 应用实现了 WorkManager Configuration.Provider，需移除默认的 androidx.startup 初始化器
+             （否则 lint RemoveWorkManagerInitializer 报错，且会与自定义 WorkerFactory 冲突） -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="remove" />
+
+        <!-- 高德 Android Key（包名 com.example.earthonline + 调试版 SHA1） -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="efd821c517aec46f36a1ea6c1debc898" />
+
+        <!-- 收藏/备份文件分享（FileProvider，阶段2 备份导入导出使用） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 每日 09:00 精确闹钟触发提醒任务 -->
+        <receiver
+            android:name=".reminder.ReminderAlarmReceiver"
+            android:exported="false" />
+        <!-- 开机后重新调度提醒 -->
+        <receiver
+            android:name=".reminder.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v1.0.0：桌面总览小组件。
+             exported 必须为 true —— APPWIDGET_UPDATE 等广播由系统桌面发出，属于外部调用。 -->
+        <receiver
+            android:name=".widget.OverviewWidget"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/overview_widget_info" />
+        </receiver>
+    </application>
+</manifest>

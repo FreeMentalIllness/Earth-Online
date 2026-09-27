@@ -1,0 +1,111 @@
+package com.example.earthonline.ui.navigation
+
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
+import com.example.earthonline.ui.report.ReportKind
+import com.example.earthonline.ui.achievements.AchievementViewModel
+import com.example.earthonline.ui.achievements.AchievementsRoute
+import com.example.earthonline.ui.ai.AiRoute
+import com.example.earthonline.ui.backpack.BackpackRoute
+import com.example.earthonline.ui.components.MoreMenuActions
+import com.example.earthonline.ui.data.DataRoute
+import com.example.earthonline.ui.home.HomeRoute
+import com.example.earthonline.ui.map.MapRoute
+import com.example.earthonline.ui.profile.ProfileRoute
+import com.example.earthonline.ui.report.ReportRoute
+import com.example.earthonline.ui.settings.SettingsRoute
+import com.example.earthonline.ui.tasks.TasksRoute
+
+/**
+ * @param moreActions 右上角设置按钮的行为（导航 / 记账下载框），由 MainScaffold 统一注入
+ * @param achVm 成就 VM（由 MainScaffold 创建并共享）。必须复用同一实例 ——
+ *              它可以挂在 NavBackStackEntry 上，但那样会与框架层那份并存，
+ *              两个引擎同时跑会各写一条「解锁成就」动态。
+ */
+@Composable
+fun AppNavHost(
+    navController: NavHostController,
+    modifier: Modifier = Modifier,
+    /** 起始页（桌面小组件入口可直达某个 Tab）；NavHost 只在构建时用它，后续跳转走 MainScaffold */
+    startDestination: String = Screen.Home.route,
+    achVm: AchievementViewModel? = null,
+    moreActions: MoreMenuActions = MoreMenuActions(onNavigate = {}, onAccounting = {})
+) {
+    NavHost(
+        navController = navController,
+        startDestination = startDestination,
+        modifier = modifier,
+        /* v1.2.1：页面切换过渡。
+           进场的页从下方 1/10 高度处上滑 + 淡入，离场的页只淡出（不做反向位移，
+           否则两页同时动会显得「晃」）。参数都很短（170~260ms）——
+           导航动画超过 300ms 就会让人觉得「点了要等一下」。 */
+        enterTransition = {
+            fadeIn(tween(170)) + slideInVertically(tween(260)) { it / 10 }
+        },
+        exitTransition = { fadeOut(tween(140)) },
+        popEnterTransition = { fadeIn(tween(170)) },
+        popExitTransition = {
+            fadeOut(tween(140)) + slideOutVertically(tween(200)) { it / 10 }
+        }
+    ) {
+        composable(Screen.Home.route) {
+            // 主页内的卡片 / 快速入口 / 头像统一走这里跳转（头像 -> 个人资料）
+            HomeRoute(
+                onNavigate = { route ->
+                    navController.navigate(route) { launchSingleTop = true }
+                },
+                moreActions = MoreMenuActions(
+                    onNavigate = { route ->
+                        navController.navigate(route) { launchSingleTop = true }
+                    },
+                    onAccounting = moreActions.onAccounting
+                )
+            )
+        }
+        // 阶段 2 批次A：任务 + 背包 已落地
+        composable(Screen.Tasks.route) { TasksRoute(moreActions = moreActions) }
+        // 主页「新建任务」：进入任务页即弹出新增对话框（独立路由，见 Screen.NewTask 注释）
+        composable(Screen.NewTask.route) {
+            TasksRoute(moreActions = moreActions, openAddOnEntry = true)
+        }
+        composable(Screen.Backpack.route) {
+            BackpackRoute(startTab = 0, moreActions = moreActions)
+        }
+        // 「收藏」= 背包页的收藏 Tab，独立路由（见 Screen.Collections 注释）
+        composable(Screen.Collections.route) {
+            BackpackRoute(startTab = 1, moreActions = moreActions)
+        }
+        // 阶段 2 批次B：成就 + 数据看板（含日历）已落地
+        composable(Screen.Achievements.route) {
+            if (achVm != null) AchievementsRoute(vm = achVm, moreActions = moreActions)
+            else AchievementsRoute(moreActions = moreActions)
+        }
+        composable(Screen.Data.route) { DataRoute(moreActions = moreActions) }
+        // v1.0.0：周期报告（日报 / 周报 / 年报），从数据看板进入（带 kind 参数决定首屏周期）
+        composable(
+            route = Screen.Report.route + "?kind={kind}",
+            arguments = listOf(navArgument("kind") { defaultValue = "day" })
+        ) { backStackEntry ->
+            val kind = when (backStackEntry.arguments?.getString("kind")) {
+                "week" -> ReportKind.WEEK
+                "year" -> ReportKind.YEAR
+                else -> ReportKind.DAY
+            }
+            ReportRoute(moreActions = moreActions, startKind = kind)
+        }
+        // 阶段 3：个人资料页 + 高德足迹地图已落地
+        composable(Screen.Profile.route) { ProfileRoute(moreActions = moreActions) }
+        composable(Screen.Map.route) { MapRoute(moreActions = moreActions) }
+        composable(Screen.Ai.route) { AiRoute(moreActions = moreActions) }
+        composable(Screen.Settings.route) { SettingsRoute(moreActions = moreActions) }
+    }
+}
