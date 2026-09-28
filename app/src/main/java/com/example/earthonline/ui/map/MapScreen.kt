@@ -178,9 +178,13 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                         MapsInitializer.updatePrivacyAgree(ctx, true)
                         MapsInitializer.updatePrivacyShow(ctx, true, true)
                         val mv = MapView(ctx)
-                        // 注意：不在 factory 里调用 onCreate —— 生命周期统一交给下方的
-                        // DisposableEffect(Unit)，保证 onCreate/onResume/onPause/onDestroy
-                        // 顺序与配对正确，避免离开页面未正确销毁、再次进入时崩溃。
+                        // 关键修复（地图打不开/黑屏的根因）：MapView 必须在创建后立即完成
+                        // onCreate + onResume，否则底图永不加载。原先把 onCreate/onResume 放到
+                        // 独立的 DisposableEffect(Unit) 去读 mutableStateOf 里的 mapView，而 factory
+                        // 在布局阶段才创建 MapView，存在时序竞争（effect 可能先于 factory 执行 →
+                        // mapView 仍为 null → onCreate 从未被调用）。现改为在 factory 内同步初始化。
+                        mv.onCreate(null)
+                        mv.onResume()
                         mapView = mv
                         aMap = mv.map
                         aMap?.uiSettings?.isMyLocationButtonEnabled = false
@@ -189,6 +193,13 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                             showAdd = true
                         }
                         mv
+                    },
+                    // 离开地图页 / 配置变更时按正确顺序释放，避免来回切换闪退。
+                    onRelease = { mv ->
+                        try { mv.onPause() } catch (_: Exception) { }
+                        try { mv.onDestroy() } catch (_: Exception) { }
+                        if (mapView === mv) mapView = null
+                        aMap = null
                     }
                 )
             } else {
@@ -215,20 +226,9 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         }
     }
 
-    // 地图生命周期：集中管理 onCreate/onResume/onPause/onDestroy 并全部 try/catch 容错。
-    // 关键修复：此前 factory 里 onCreate、onRelease 里 onDestroy，与这里的 onResume/onPause
-    // 释放顺序不保证，会出现「onPause 调用到已 onDestroy 的 MapView」异常；
-    // 再次进入地图时 MapView 状态已损坏 → 闪退。现在统一在这里按正确顺序配对。
-    DisposableEffect(Unit) {
-        try { mapView?.onCreate(null) } catch (_: Exception) { }
-        try { mapView?.onResume() } catch (_: Exception) { }
-        onDispose {
-            try { mapView?.onPause() } catch (_: Exception) { }
-            try { mapView?.onDestroy() } catch (_: Exception) { }
-            mapView = null
-            aMap = null
-        }
-    }
+    // 地图生命周期已收拢到 AndroidView 的 factory（onCreate + onResume）与 onRelease
+    // （onPause + onDestroy），不再依赖独立 DisposableEffect 读取 mutableStateOf，
+    // 从而消除「onCreate 未被调用」的时序竞争（地图打不开的根因）。
 
     if (showAdd) {
         AddLocationDialog(
