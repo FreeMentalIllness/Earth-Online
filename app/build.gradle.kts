@@ -19,10 +19,10 @@ android {
         targetSdk = 35
         // v1.0.0：版本序列修正为「正式版自 1.0.0 起」；与设置页 AppInfo.version、Web 端
         // core.js 的 APP_INFO.version 三处必须一致（改一处要改三处）。
-        // versionCode 只增不减（5=批次C，6=批次D，7=本轮修正：冷启动纯白起屏 + 原图导入，8=1.0.1 修复批：记账跳转容错 + 任务状态排版），
-        // 否则已装机用户无法覆盖安装。
-        versionCode = 8
-        versionName = "1.0.1"
+        // versionCode 只增不减（5=批次C，6=批次D，7=本轮修正：冷启动纯白起屏 + 原图导入，8=1.0.1 修复批：记账跳转容错 + 任务状态排版，9=v1.0.0 正式版重发布），
+        // 否则已装机用户无法覆盖安装。versionName 回落 1.0.0 属「版本序列修正」，靠 versionCode 递增保证覆盖安装。
+        versionCode = 9
+        versionName = "1.0.0"
         vectorDrawables { useSupportLibrary = true }
         // 高德 SDK 需要原生 so 库，按需裁剪 ABI（阶段3 接入地图前可放行全部）
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }

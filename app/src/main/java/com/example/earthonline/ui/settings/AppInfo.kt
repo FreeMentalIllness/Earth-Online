@@ -20,8 +20,8 @@ object AppInfo {
      * （对应下面的 0.9.x 条目）。改版本号时**两端 + build.gradle 三处一起改**，
      * 否则用户导出备份再导入时会对不上「这到底是哪一版」。
      */
-    const val version = "1.0.1"
-    const val buildDate = "2026-09-27"
+    const val version = "1.0.0"
+    const val buildDate = "2026-09-28"
     const val license = "MIT"
 
     /** 职责分工：二十七 负责数据，Cyou2 负责设计（勿写反，也不要加「主程」等自造头衔） */
