@@ -9,7 +9,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -367,7 +376,7 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(checked = notify, onCheckedChange = { onNotifyToggle(it) })
+                        OnOffSwitch(checked = notify, onCheckedChange = { onNotifyToggle(it) })
                     }
                 }
             }
@@ -383,7 +392,7 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Switch(checked = achSound, onCheckedChange = { vm.setAchSound(it) })
+                            OnOffSwitch(checked = achSound, onCheckedChange = { vm.setAchSound(it) })
                         }
                     }
                 }
@@ -521,7 +530,7 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier.weight(1f)
                             )
-                            Switch(checked = autoSync, onCheckedChange = { vm.setAutoSync(it) })
+                            OnOffSwitch(checked = autoSync, onCheckedChange = { vm.setAutoSync(it) })
                         }
                         Text(
                             if (lastSyncAt.isBlank()) "尚未同步过"
@@ -964,16 +973,90 @@ private fun PersonChip(p: Person) {
     }
 }
 
+/**
+ * v1.2.3：分组折叠卡片。
+ * 卡片标题可点击展开/收起，默认收起，避免长列表一眼望不到底。
+ * 展开/收起带高度 + 透明度动画，交互更顺。
+ */
 @Composable
-private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Section(
+    title: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-        Column(
-            Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            content()
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "收起" else "展开",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) { content() }
+            }
         }
+    }
+}
+
+/**
+ * v1.2.3：带「开/关」文字的状态开关。
+ * 关闭态给浅灰轨道 + 边框，避免 M3 默认关态太淡看不清；
+ * 开启态用主题主色（琥珀），并在右侧显示「开/关」文字，状态一目了然。
+ */
+@Composable
+private fun OnOffSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.surface,
+                uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outline
+            )
+        )
+        Text(
+            text = if (checked) "开" else "关",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (checked) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

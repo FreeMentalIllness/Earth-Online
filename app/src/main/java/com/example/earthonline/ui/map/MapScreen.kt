@@ -122,16 +122,18 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         }
     }
 
-    // 足迹 marker 随数据变化刷新
+    // 足迹 marker 随数据变化刷新（容错：地图已销毁时静默跳过）
     LaunchedEffect(locations, aMap) {
-        aMap?.let { map ->
-            map.clear()
-            locations.forEach { loc ->
-                if (loc.lat != 0.0 || loc.lng != 0.0) {
-                    map.addMarker(MarkerOptions().position(LatLng(loc.lat, loc.lng)).title(loc.name).snippet(loc.note ?: ""))
+        try {
+            aMap?.let { map ->
+                map.clear()
+                locations.forEach { loc ->
+                    if (loc.lat != 0.0 || loc.lng != 0.0) {
+                        map.addMarker(MarkerOptions().position(LatLng(loc.lat, loc.lng)).title(loc.name).snippet(loc.note ?: ""))
+                    }
                 }
             }
-        }
+        } catch (_: Exception) { /* MapView 已销毁等情况，忽略 */ }
     }
 
     Scaffold(
@@ -176,7 +178,9 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                         MapsInitializer.updatePrivacyAgree(ctx, true)
                         MapsInitializer.updatePrivacyShow(ctx, true, true)
                         val mv = MapView(ctx)
-                        mv.onCreate(android.os.Bundle())
+                        // 注意：不在 factory 里调用 onCreate —— 生命周期统一交给下方的
+                        // DisposableEffect(Unit)，保证 onCreate/onResume/onPause/onDestroy
+                        // 顺序与配对正确，避免离开页面未正确销毁、再次进入时崩溃。
                         mapView = mv
                         aMap = mv.map
                         aMap?.uiSettings?.isMyLocationButtonEnabled = false
@@ -185,8 +189,7 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                             showAdd = true
                         }
                         mv
-                    },
-                    onRelease = { it.onDestroy() }
+                    }
                 )
             } else {
                 Column(
@@ -212,9 +215,19 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         }
     }
 
-    DisposableEffect(mapView) {
-        mapView?.onResume()
-        onDispose { mapView?.onPause() }
+    // 地图生命周期：集中管理 onCreate/onResume/onPause/onDestroy 并全部 try/catch 容错。
+    // 关键修复：此前 factory 里 onCreate、onRelease 里 onDestroy，与这里的 onResume/onPause
+    // 释放顺序不保证，会出现「onPause 调用到已 onDestroy 的 MapView」异常；
+    // 再次进入地图时 MapView 状态已损坏 → 闪退。现在统一在这里按正确顺序配对。
+    DisposableEffect(Unit) {
+        try { mapView?.onCreate(null) } catch (_: Exception) { }
+        try { mapView?.onResume() } catch (_: Exception) { }
+        onDispose {
+            try { mapView?.onPause() } catch (_: Exception) { }
+            try { mapView?.onDestroy() } catch (_: Exception) { }
+            mapView = null
+            aMap = null
+        }
     }
 
     if (showAdd) {

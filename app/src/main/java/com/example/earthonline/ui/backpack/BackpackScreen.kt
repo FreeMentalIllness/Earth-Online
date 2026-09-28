@@ -150,17 +150,34 @@ private fun ItemsPane(
     onAddItem: () -> Unit,
     onManageCategories: () -> Unit
 ) {
+    // 顶部模糊搜索（名称 / 描述 / 分类）
+    var query by remember { mutableStateOf("") }
     // null=全部，""=未分类，其它=分类名
     var cat by remember { mutableStateOf<String?>(null) }
-    val filtered = remember(items, cat) {
-        when (cat) {
-            null -> items
-            "" -> items.filter { it.category.isNullOrBlank() }
-            else -> items.filter { it.category == cat }
+    val filtered = remember(items, query, cat) {
+        items.filter { it ->
+            val matchCat = when (cat) {
+                null -> true
+                "" -> it.category.isNullOrBlank()
+                else -> it.category == cat
+            }
+            val matchQuery = query.isBlank() ||
+                    it.name.contains(query, true) ||
+                    (it.description ?: "").contains(query, true) ||
+                    (it.category ?: "").contains(query, true)
+            matchCat && matchQuery
         }
     }
 
     Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query, onValueChange = { query = it },
+            placeholder = { Text("搜索名称 / 描述 / 分类") },
+            leadingIcon = { Icon(Icons.Filled.Search, null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+                .padding(UiDimens.ListPad, UiDimens.ListPad, UiDimens.ListPad, 0.dp)
+        )
         CategoryFilterRow(
             categories = categories,
             selected = cat,
@@ -178,7 +195,7 @@ private fun ItemsPane(
                     onAction = onAddItem
                 )
             } else {
-                EmptyHint("该分类下暂无物品", emoji = "🎒")
+                EmptyHint(if (query.isBlank()) "该分类下暂无物品" else "没有匹配的物品", emoji = "🔍")
             }
         } else {
             LazyColumn(
