@@ -9,9 +9,13 @@
         <item name="android:windowBackground">@color/background_dark</item>
     </style>
 
+    <!-- v1.0.3+：深色 Splash 补齐 android:windowBackground（values-night 是整体替换、不与 values 合并，
+         不写就继承 Theme.SplashScreen 默认色 → 冷启动最前一帧露出亮色，出现「白闪」）；
+         同时图标改为透明占位（与浅色一致），避免系统层先画一个地球、Compose 开屏页再画一次的重影。 -->
     <style name="Theme.EarthOnline.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/background_dark</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowBackground">@color/background_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
         <item name="postSplashScreenTheme">@style/Theme.EarthOnline</item>
     </style>
 </resources>

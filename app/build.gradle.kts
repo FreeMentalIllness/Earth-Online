@@ -23,7 +23,9 @@ android {
         // 否则已装机用户无法覆盖安装。versionName 回落 1.0.0 属「版本序列修正」，靠 versionCode 递增保证覆盖安装。
         // versionCode 19 = v1.0.3：高德引擎升 v10（根治新 Android 上足迹地图初始化崩溃）
         // + 主页视觉统一（卡片圆角/入口Tile自适应/动态按钮高对比）+ 列表重组性能优化
-        versionCode = 19
+        // versionCode 20 = v1.0.3 补丁：深色模式开屏补齐 windowBackground（根治冷启动白闪）
+        // + 系统层启动图去掉图标（消除「地球」重影）。versionName 仍为 1.0.3，不跨端改动。
+        versionCode = 20
         versionName = "1.0.3"
         vectorDrawables { useSupportLibrary = true }
         // 高德 SDK 需要原生 so 库，按需裁剪 ABI（阶段3 接入地图前可放行全部）
