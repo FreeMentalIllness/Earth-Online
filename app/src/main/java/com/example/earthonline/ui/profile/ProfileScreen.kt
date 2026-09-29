@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -24,6 +25,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.earthonline.data.model.CustomField
 import com.example.earthonline.ui.components.AnimatedAlertDialog
+import com.example.earthonline.ui.components.CropShape
+import com.example.earthonline.ui.components.ImageCropperDialog
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
 import com.example.earthonline.ui.theme.AmberPrimary
@@ -70,6 +73,10 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
     var editing by remember { mutableStateOf(false) }
     var showAvatarPicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
+    /* v1.2.4：头像导入改为「先选图 → 裁剪框缩放/移动 → 确认」。
+       裁剪输出为无损 PNG（见 ui/components/ImageCropper.kt），不再整图塞进圆形。 */
+    var showCrop by remember { mutableStateOf(false) }
+    var cropUri by remember { mutableStateOf<Uri?>(null) }
 
     /* v1.0.0：分享卡片状态。
        卡片位图只在生成过程中短暂存在：画完立刻写文件，然后回收位图，
@@ -103,24 +110,8 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
        显示端交给 Coil 按控件尺寸采样（见 ui/components/Avatar.kt），内存与画质两头都要。
        复制全程在 IO 线程，不占主线程。 */
     val pickAvatar = rememberImagePicker(onPicked = { uri ->
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ImageStore.importOriginal(
-                    context = context,
-                    uri = uri,
-                    dir = ImageStore.avatarDir(context),
-                    prefix = "avatar"
-                )
-            }
-            result.onSuccess { file ->
-                vm.setUploadedAvatarPath(file.absolutePath)
-                snackbar.showSnackbar(
-                    "头像已更新（原图 ${ImageStore.prettySize(file.length())}，保存后生效）"
-                )
-            }.onFailure { e ->
-                snackbar.showSnackbar("导入失败：${e.message ?: "无法读取这张图片"}")
-            }
-        }
+        cropUri = uri
+        showCrop = true
     })
 
     Scaffold(
@@ -348,6 +339,27 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
             },
             dismissButton = { TextButton({ showDatePicker = false }) { Text("取消") } }
         ) { DatePicker(state) }
+    }
+
+    if (showCrop && cropUri != null) {
+        ImageCropperDialog(
+            uri = cropUri!!,
+            shape = CropShape.Circle,
+            outputDir = ImageStore.avatarDir(context),
+            prefix = "avatar",
+            onConfirm = { file ->
+                vm.setUploadedAvatarPath(file.absolutePath)
+                ImageStore.clearDirExcept(ImageStore.avatarDir(context), file)
+                showCrop = false
+                cropUri = null
+                scope.launch {
+                    snackbar.showSnackbar(
+                        "头像已更新（裁剪无损 · ${ImageStore.prettySize(file.length())}，保存后生效）"
+                    )
+                }
+            },
+            onDismiss = { showCrop = false; cropUri = null }
+        )
     }
 }
 

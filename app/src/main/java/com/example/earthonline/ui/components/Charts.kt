@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -93,10 +94,16 @@ fun BarChart(
     maxHeight: androidx.compose.ui.unit.Dp = 140.dp,
     color: Color = AmberPrimary,
     averageValue: Int? = null,
-    averageLabel: String? = null
+    averageLabel: String? = null,
+    /** 0 数据时的引导文案（主标题） */
+    emptyLabel: String = "暂无数据",
+    /** 0 数据时的引导文案（补充说明，可选） */
+    emptyHint: String? = null,
+    /** 0 数据时的骨架柱数量 */
+    skeletonCount: Int = 12
 ) {
     if (items.isEmpty()) {
-        Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        EmptyBarSkeleton(maxHeight = maxHeight, bars = skeletonCount, label = emptyLabel, hint = emptyHint)
         return
     }
     val max = items.maxOf { it.value }.coerceAtLeast(1)
@@ -180,6 +187,73 @@ fun BarChart(
                 }
                 Text(averageLabel, style = MaterialTheme.typography.labelSmall, color = avgColor)
             }
+        }
+    }
+}
+
+/**
+ * 「近 14 天活跃度」「任务分类分布」等柱状图在 0 数据时的骨架占位。
+ *
+ * 比一行「暂无数据」更有指引感：用半透明虚线轮廓画出一排高低错落的占位柱 +
+ * 一条基线，暗示「这里会生长出图表」；再配一句明确的引导文案告诉用户去哪产生数据。
+ * 占位柱只描边不填充（wireframe 风格），颜色取暖琥珀低透明度，贴合全局配色。
+ */
+@Composable
+private fun EmptyBarSkeleton(
+    maxHeight: Dp,
+    bars: Int,
+    label: String,
+    hint: String?
+) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.fillMaxWidth().height(maxHeight), contentAlignment = Alignment.BottomCenter) {
+            Canvas(Modifier.fillMaxSize()) {
+                val n = bars.coerceAtLeast(1)
+                val slot = size.width / n
+                val barW = (slot * 0.5f).coerceAtMost(28.dp.toPx())
+                // 虚线描边：半透明暖棕，wireframe 风格
+                val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+                val stroke = Stroke(width = 1.5.dp.toPx(), pathEffect = dash)
+                val color = AmberPrimary.copy(alpha = 0.35f)
+                repeat(n) { i ->
+                    // 稳定伪随机的高低错落（同样的 i 永远同一高度，避免每次重组抖动）
+                    val hFrac = ((i * 53) % 6 + 3) / 9f
+                    val h = (size.height * hFrac).coerceIn(16.dp.toPx(), size.height - 4.dp.toPx())
+                    val left = slot * i + (slot - barW) / 2f
+                    drawRoundRect(
+                        color = color,
+                        topLeft = Offset(left, size.height - h),
+                        size = Size(barW, h),
+                        style = stroke,
+                        cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
+                    )
+                }
+                // 基线
+                drawLine(
+                    color,
+                    Offset(0f, size.height - 1.dp.toPx()),
+                    Offset(size.width, size.height - 1.dp.toPx()),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        if (hint != null) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                hint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
         }
     }
 }

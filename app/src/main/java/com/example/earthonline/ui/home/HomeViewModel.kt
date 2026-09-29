@@ -19,6 +19,7 @@ import com.example.earthonline.data.repository.LocationRepository
 import com.example.earthonline.data.repository.MemoRepository
 import com.example.earthonline.data.repository.ProfileRepository
 import com.example.earthonline.data.repository.TaskRepository
+import com.example.earthonline.data.local.datastore.SettingsDataStore
 import com.example.earthonline.util.LifeStats
 import com.example.earthonline.util.lifeStatsOf
 import com.example.earthonline.util.localDayOf
@@ -26,6 +27,7 @@ import com.example.earthonline.util.nowIso
 import com.example.earthonline.util.todayStr
 import com.example.earthonline.util.uid
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,8 +37,11 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.SetSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
@@ -46,9 +51,18 @@ import javax.inject.Inject
 data class TimelineItem(
     val key: String,
     val day: String,
-    val kind: String,   // task / ach / loc
+    val kind: String,   // task / ach / loc / custom
     val title: String,
     val time: String
+)
+
+/** 用户在主页「人生时间轴」手动添加的里程碑事件（持久化在 DataStore，不改动 Room 表结构） */
+@kotlinx.serialization.Serializable
+private data class CustomTimelineEvent(
+    val id: String,
+    val title: String,
+    val day: String,
+    val note: String
 )
 
 /**
@@ -99,7 +113,11 @@ data class HomeUiState(
     val locationCount: Int = 0,
     val recentMemos: List<MemoEntity> = emptyList(),
     val recentActs: List<ActivityEntity> = emptyList(),
-    val timeline: List<TimelineItem> = emptyList()
+    val timeline: List<TimelineItem> = emptyList(),
+    /** 用户手动添加的里程碑事件（与时间轴自动事件合并展示） */
+    val customTimeline: List<TimelineItem> = emptyList(),
+    /** 最近动态显示类型筛选（供 UI 回显 FilterChip 选中态） */
+    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo")
 ) {
     val doneRatio: Int get() = if (totalTasks > 0) Math.round(doneTasks * 100f / totalTasks) else 0
     /** v1.2.0：成就进度（概览卡第三行，四卡统一三行文案用） */
@@ -127,7 +145,9 @@ private data class Parts(
     val loc: LocStat = LocStat(0, emptyList()),
     val acts: List<ActivityEntity> = emptyList(),
     val doneTaskRows: List<TaskEntity> = emptyList(),
-    val collectionCount: Int = 0
+    val collectionCount: Int = 0,
+    val customTimeline: List<TimelineItem> = emptyList(),
+    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo")
 )
 
 /**
@@ -144,6 +164,7 @@ class HomeViewModel @Inject constructor(
     private val itemRepo: ItemRepository,
     private val locationRepo: LocationRepository,
     private val collectionRepo: CollectionRepository,
+    private val settingsDs: SettingsDataStore,
     private val json: Json
 ) : ViewModel() {
 
@@ -162,6 +183,22 @@ class HomeViewModel @Inject constructor(
     // v1.2.0：概览「背包」卡第三行要显示收藏数
     private val collectionFlow = collectionRepo.count()
 
+    /** 用户在时间轴手动添加的里程碑（DataStore 持久化） */
+    private val customFlow: Flow<List<TimelineItem>> = settingsDs.customTimelineJson.map { txt ->
+        if (txt.isBlank()) emptyList()
+        else runCatching {
+            json.decodeFromString(ListSerializer(CustomTimelineEvent.serializer()), txt)
+                .map { e -> TimelineItem("custom-${e.id}", e.day, "custom", e.title, e.day + "T00:00:00.000Z") }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 最近动态显示类型筛选（task/ach/item/memo），空集视作显示全部 */
+    private val feedFilterFlow: Flow<Set<String>> = settingsDs.homeFeedFilterJson.map { txt ->
+        if (txt.isBlank()) setOf("task", "ach", "item", "memo")
+        else runCatching { json.decodeFromString(SetSerializer(String.serializer()), txt) }
+            .getOrDefault(setOf("task", "ach", "item", "memo"))
+    }
+
     val state: StateFlow<HomeUiState> =
         combine(profileFlow, taskFlow, memoFlow, achFlow, itemFlow) { p, t, m, a, i ->
             Parts(p, t, m, a, i)
@@ -170,8 +207,58 @@ class HomeViewModel @Inject constructor(
             .combine(actFlow) { parts, acts -> parts.copy(acts = acts) }
             .combine(doneTaskFlow) { parts, rows -> parts.copy(doneTaskRows = rows) }
             .combine(collectionFlow) { parts, c -> parts.copy(collectionCount = c) }
+            .combine(customFlow) { parts, custom -> parts.copy(customTimeline = custom) }
+            .combine(feedFilterFlow) { parts, kinds -> parts.copy(feedKinds = kinds) }
             .map { it.toUi() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+
+    /* ---------------- 主页自定义：时间轴里程碑 / 动态流筛选 ---------------- */
+
+    /** 从 DataStore 读取原始自定义里程碑列表（解码失败回落空列表，绝不崩） */
+    private suspend fun loadCustomEvents(): List<CustomTimelineEvent> {
+        val txt = settingsDs.customTimelineJson.first()
+        if (txt.isBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(CustomTimelineEvent.serializer()), txt)
+        }.getOrDefault(emptyList())
+    }
+
+    /** 添加一条用户自定义里程碑到时间轴（DataStore 持久化，不改动 Room 表结构） */
+    fun addCustomTimelineEvent(title: String, day: String, note: String) {
+        val t = title.trim()
+        if (t.isBlank() || day.isBlank()) return
+        viewModelScope.launch {
+            val list = loadCustomEvents() + CustomTimelineEvent(
+                id = uid("tl"),
+                title = t.take(40),
+                day = day,
+                note = note.take(200)
+            )
+            settingsDs.setCustomTimelineJson(
+                json.encodeToString(ListSerializer(CustomTimelineEvent.serializer()), list)
+            )
+        }
+    }
+
+    /** 删除一条自定义里程碑（[id] 为 UI 传入的 key：`custom-xxx`，需剥掉前缀） */
+    fun deleteCustomTimelineEvent(id: String) {
+        viewModelScope.launch {
+            val rawId = id.removePrefix("custom-")
+            val list = loadCustomEvents().filter { it.id != rawId }
+            settingsDs.setCustomTimelineJson(
+                json.encodeToString(ListSerializer(CustomTimelineEvent.serializer()), list)
+            )
+        }
+    }
+
+    /** 设置最近动态的显示类型（task/ach/item/memo） */
+    fun setFeedKinds(kinds: Set<String>) {
+        viewModelScope.launch {
+            settingsDs.setHomeFeedFilterJson(
+                json.encodeToString(SetSerializer(String.serializer()), kinds)
+            )
+        }
+    }
 
     /* ---------------- v1.2.1：主页顶部全局搜索 ---------------- */
 
@@ -280,8 +367,13 @@ class HomeViewModel @Inject constructor(
             totalMemos = memo.total,
             locationCount = loc.total,
             recentMemos = memo.recent,
-            recentActs = acts,
-            timeline = buildTimeline()
+            recentActs = acts.filter { it.kind in feedKinds },
+            // 自动事件 + 用户自定义里程碑合并按时间倒序；空集 = 显示全部类型
+            timeline = (buildTimeline() + customTimeline)
+                .sortedWith(compareByDescending { it.time })
+                .take(TIMELINE_SHOW),
+            customTimeline = customTimeline,
+            feedKinds = feedKinds
         )
     }
 

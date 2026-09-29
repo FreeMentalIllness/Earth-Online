@@ -3,6 +3,7 @@ package com.example.earthonline.ui.map
 import android.Manifest
 import android.content.Intent
 import android.provider.Settings
+import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,7 @@ import com.example.earthonline.ui.components.SettingsIconButton
 import com.example.earthonline.ui.theme.AmberPrimary
 import com.example.earthonline.util.LocationHelper
 import com.example.earthonline.util.LocateError
+import com.example.earthonline.util.LocateResult
 import com.example.earthonline.util.millisToDayStr
 import com.example.earthonline.util.todayStr
 import kotlinx.coroutines.launch
@@ -48,6 +50,16 @@ import kotlinx.coroutines.launch
  * 若需临时降级为足迹列表（如排查地图黑屏），改为 false 即可。
  */
 private const val MAP_ENABLED = true
+
+/**
+ * 持有 MapView / AMap 的引用。
+ * 关键点：这是**普通对象**（非 Compose State），在 AndroidView 的 factory 里赋值不会触发
+ * 组合期状态写入；后续在协程 / 点击事件里读取即可，彻底规避「组合期写 State」导致的崩溃。
+ */
+private class MapRef {
+    var view: MapView? = null
+    val aMap: AMap? get() = view?.map
+}
 
 @Composable
 fun MapRoute(moreActions: MoreMenuActions, vm: MapViewModel = hiltViewModel()) =
@@ -61,8 +73,13 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
     val snackbar = remember { SnackbarHostState() }
     val locations by vm.locations.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    var mapView by remember { mutableStateOf<MapView?>(null) }
-    var aMap by remember { mutableStateOf<AMap?>(null) }
+    // 普通对象持有 MapView，避免组合期写 State（地图闪退根因之一）
+    val mapRef = remember { MapRef() }
+    // mapReady 在「视图真正 attach 到窗口」后设置（不在组合期），可安全写入 State
+    var mapReady by remember { mutableStateOf(false) }
+    // 高德 SDK / 原生 so 加载失败时退化为列表视图，避免硬崩
+    var mapFailed by remember { mutableStateOf(false) }
+
     var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var pendingLatLng by remember { mutableStateOf<LatLng?>(null) }
@@ -81,14 +98,16 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         LocationHelper.requestCurrentLocation(context) { result ->
             locating = false
             when (result) {
-                is com.example.earthonline.util.LocateResult.Success -> {
+                is LocateResult.Success -> {
                     val ll = LatLng(result.lat, result.lng)
                     currentLatLng = ll
-                    aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(ll, 15f))
-                    aMap?.addMarker(MarkerOptions().position(ll).title("我的位置"))
+                    mapRef.aMap?.let { map ->
+                        runCatching { map.moveCamera(CameraUpdateFactory.newLatLngZoom(ll, 15f)) }
+                        runCatching { map.addMarker(MarkerOptions().position(ll).title("我的位置")) }
+                    }
                     if (!silent) scope.launch { snackbar.showSnackbar("已定位到当前位置") }
                 }
-                is com.example.earthonline.util.LocateResult.Failure -> scope.launch {
+                is LocateResult.Failure -> scope.launch {
                     when (result.error) {
                         LocateError.NO_PERMISSION -> snackbar.showSnackbar("没有定位权限，请授予后再试")
                         LocateError.DISABLED -> snackbar.showSnackbar(
@@ -113,27 +132,27 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         else scope.launch { snackbar.showSnackbar("未授予定位权限，可在系统设置中开启") }
     }
 
-    // 进入地图且已授权时，静默定位一次（失败不打扰用户）
+    // 进入地图且已授权时，静默定位一次（失败不打扰用户）；mapReady 之后才触发，避免空指针
     var autoLocateDone by remember { mutableStateOf(false) }
-    LaunchedEffect(aMap) {
-        if (!autoLocateDone && aMap != null && LocationHelper.hasPermission(context)) {
+    LaunchedEffect(mapReady) {
+        if (!autoLocateDone && mapReady && LocationHelper.hasPermission(context)) {
             autoLocateDone = true
             locate(true)
         }
     }
 
-    // 足迹 marker 随数据变化刷新（容错：地图已销毁时静默跳过）
-    LaunchedEffect(locations, aMap) {
-        try {
-            aMap?.let { map ->
-                map.clear()
-                locations.forEach { loc ->
-                    if (loc.lat != 0.0 || loc.lng != 0.0) {
-                        map.addMarker(MarkerOptions().position(LatLng(loc.lat, loc.lng)).title(loc.name).snippet(loc.note ?: ""))
-                    }
+    // 足迹 marker 随数据变化刷新（容错：地图尚未就绪时静默跳过）
+    LaunchedEffect(locations, mapReady) {
+        if (!mapReady) return@LaunchedEffect
+        val map = mapRef.aMap ?: return@LaunchedEffect
+        runCatching {
+            map.clear()
+            locations.forEach { loc ->
+                if (loc.lat != 0.0 || loc.lng != 0.0) {
+                    map.addMarker(MarkerOptions().position(LatLng(loc.lat, loc.lng)).title(loc.name).snippet(loc.note ?: ""))
                 }
             }
-        } catch (_: Exception) { /* MapView 已销毁等情况，忽略 */ }
+        }
     }
 
     Scaffold(
@@ -164,45 +183,62 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                     }
                 }
                 FloatingActionButton(onClick = {
-                    pendingLatLng = aMap?.cameraPosition?.target ?: currentLatLng
+                    pendingLatLng = mapRef.aMap?.cameraPosition?.target ?: currentLatLng
                     showAdd = true
                 }) { Icon(Icons.Filled.Add, null) }
             }
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            if (MAP_ENABLED) {
+            if (MAP_ENABLED && !mapFailed) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
-                        MapsInitializer.updatePrivacyAgree(ctx, true)
-                        MapsInitializer.updatePrivacyShow(ctx, true, true)
-                        val mv = MapView(ctx)
-                        // 关键修复（地图打不开/黑屏的根因）：MapView 必须在创建后立即完成
-                        // onCreate + onResume，否则底图永不加载。原先把 onCreate/onResume 放到
-                        // 独立的 DisposableEffect(Unit) 去读 mutableStateOf 里的 mapView，而 factory
-                        // 在布局阶段才创建 MapView，存在时序竞争（effect 可能先于 factory 执行 →
-                        // mapView 仍为 null → onCreate 从未被调用）。现改为在 factory 内同步初始化。
-                        mv.onCreate(null)
-                        mv.onResume()
-                        mapView = mv
-                        aMap = mv.map
-                        aMap?.uiSettings?.isMyLocationButtonEnabled = false
-                        aMap?.setOnMapLongClickListener { latLng ->
-                            pendingLatLng = latLng
-                            showAdd = true
+                        // 隐私合规：必须在创建 MapView 之前同意隐私政策（否则新版 SDK 会抛异常）
+                        runCatching { MapsInitializer.updatePrivacyAgree(ctx, true) }
+                        runCatching { MapsInitializer.updatePrivacyShow(ctx, false, false) }
+                        val mv = try {
+                            MapView(ctx).apply { onCreate(null) }
+                        } catch (e: Throwable) {
+                            mapFailed = true
+                            return@AndroidView android.widget.FrameLayout(ctx)
                         }
+                        mapRef.view = mv
+                        runCatching { mv.map.uiSettings.isMyLocationButtonEnabled = false }
+                        runCatching {
+                            mv.map.setOnMapLongClickListener { latLng ->
+                                pendingLatLng = latLng
+                                showAdd = true
+                            }
+                        }
+                        // 关键修复（地图闪退根因）：onResume 必须在「视图真正 attach 到窗口」之后调用，
+                        // 此时 GL Surface 才就绪；在 factory 里直接 onResume 会因 surface 未就绪而崩溃。
+                        // 同时把 mapReady 状态放到 attach 回调里设置（非组合期，安全写入 State）。
+                        mv.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                            override fun onViewAttachedToWindow(v: View) {
+                                runCatching { mv.onResume() }
+                                mapReady = true
+                            }
+                            override fun onViewDetachedFromWindow(v: View) {
+                                runCatching { mv.onPause() }
+                            }
+                        })
                         mv
                     },
                     // 离开地图页 / 配置变更时按正确顺序释放，避免来回切换闪退。
-                    onRelease = { mv ->
-                        try { mv.onPause() } catch (_: Exception) { }
-                        try { mv.onDestroy() } catch (_: Exception) { }
-                        if (mapView === mv) mapView = null
-                        aMap = null
+                    // 注：AndroidView 的 reified 类型被推断为 View（factory 失败分支返回 FrameLayout），
+                    // 故这里需向下转型为 MapView 再调用生命周期方法（失败分支转型为 null 会被跳过）。
+                    onRelease = { v ->
+                        (v as? MapView)?.let { mv ->
+                            runCatching { mv.onPause() }
+                            runCatching { mv.onDestroy() }
+                            if (mapRef.view === mv) mapRef.view = null
+                        }
+                        mapReady = false
                     }
                 )
-            } else {
+            }
+            if (mapFailed) {
                 Column(
                     Modifier.fillMaxSize().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -212,9 +248,9 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                         colors = CardDefaults.cardColors(containerColor = AmberPrimary.copy(alpha = 0.12f))
                     ) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("地图待配置高德 Key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("地图组件加载失败", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "将 AndroidManifest.xml 中 com.amap.api.v2.apikey 改为你的高德 Android Key，并把 MapScreen.kt 顶部 MAP_ENABLED 改为 true，即可显示交互式地图。当前以列表展示足迹。",
+                                "高德地图原生组件未能初始化（可能是设备缺少相应图形库）。已自动切换为足迹列表，不影响其它功能。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -225,10 +261,6 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
             }
         }
     }
-
-    // 地图生命周期已收拢到 AndroidView 的 factory（onCreate + onResume）与 onRelease
-    // （onPause + onDestroy），不再依赖独立 DisposableEffect 读取 mutableStateOf，
-    // 从而消除「onCreate 未被调用」的时序竞争（地图打不开的根因）。
 
     if (showAdd) {
         AddLocationDialog(

@@ -46,6 +46,10 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val FONT_SCALE = stringPreferencesKey("earth_font_scale")
         /** v1.2.1：成就解锁音效开关（对应 Web 的 earth_ach_sound） */
         val ACH_SOUND = booleanPreferencesKey("earth_ach_sound")
+        /** 主页「人生时间轴」用户自定义里程碑事件（JSON 列表，避免动 DB 表结构） */
+        val CUSTOM_TIMELINE = stringPreferencesKey("custom_timeline_events")
+        /** 主页「最近动态」显示类型筛选（JSON 集合：task/ach/item/memo，全空则显示全部） */
+        val HOME_FEED_FILTER = stringPreferencesKey("home_feed_filter")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -94,5 +98,13 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     /** 成就解锁音效开关（默认开启） */
     val achSound: Flow<Boolean> = ds.data.map { it[ACH_SOUND] ?: true }
 
+    /** 主页时间轴自定义事件（JSON 列表，空串 = 无自定义事件） */
+    val customTimelineJson: Flow<String> = ds.data.map { it[CUSTOM_TIMELINE] ?: "" }
+
+    /** 主页动态流筛选（JSON 集合，空串 = 显示全部） */
+    val homeFeedFilterJson: Flow<String> = ds.data.map { it[HOME_FEED_FILTER] ?: "" }
+
     suspend fun setAchSound(v: Boolean) = ds.edit { it[ACH_SOUND] = v }
+    suspend fun setCustomTimelineJson(v: String) = ds.edit { it[CUSTOM_TIMELINE] = v }
+    suspend fun setHomeFeedFilterJson(v: String) = ds.edit { it[HOME_FEED_FILTER] = v }
 }

@@ -1,6 +1,7 @@
 package com.example.earthonline
 
 import android.app.Application
+import com.amap.api.maps.MapsInitializer
 import androidx.work.Configuration
 import com.example.earthonline.data.backup.AutoBackupManager
 import com.example.earthonline.data.local.datastore.SettingsDataStore
@@ -43,6 +44,10 @@ class EarthOnlineApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // 高德地图隐私合规：必须在任何 MapView 创建前同意隐私政策，否则新版 SDK 会抛异常导致地图闪退。
+        // 放在 Application 启动处一次性同意，覆盖所有地图入口。
+        runCatching { MapsInitializer.updatePrivacyAgree(this, true) }
+        runCatching { MapsInitializer.updatePrivacyShow(this, false, false) }
         // 通知渠道随应用启动创建（权限未授予也不影响渠道存在）
         ReminderScheduler.createChannel(this)
         // 若用户此前已开启到期提醒，重启应用后重新调度每日闹钟

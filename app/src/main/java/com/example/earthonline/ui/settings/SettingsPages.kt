@@ -42,6 +42,8 @@ import com.example.earthonline.util.openUrlInBrowser
 import com.example.earthonline.util.rememberImagePicker
 import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.MoreMenuActions
+import com.example.earthonline.ui.components.CropShape
+import com.example.earthonline.ui.components.ImageCropperDialog
 import android.app.DownloadManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -85,22 +87,13 @@ fun AppearanceRoute(
     val wallpaperAlpha by vm.wallpaperAlpha.collectAsStateWithLifecycle(initialValue = 0.35f)
     val fontScale by vm.fontScale.collectAsStateWithLifecycle(initialValue = "std")
 
+    /* v1.2.4：壁纸导入改为「先选图 → 裁剪框缩放/移动（铺满屏幕）→ 确认」，
+       裁剪输出无损 PNG（见 ui/components/ImageCropper.kt）。 */
+    var showWallpaperCrop by remember { mutableStateOf(false) }
+    var wallpaperCropUri by remember { mutableStateOf<Uri?>(null) }
     val pickWallpaper = rememberImagePicker(onPicked = { uri ->
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val dir = ImageStore.wallpaperDir(context)
-                ImageStore.importOriginal(context, uri, dir, "wallpaper").map { file ->
-                    ImageStore.clearDirExcept(dir, file)
-                    file
-                }
-            }
-            result.onSuccess { file ->
-                vm.setWallpaper(file.absolutePath)
-                snackbar.showSnackbar("壁纸已设置（原图 ${ImageStore.prettySize(file.length())}）")
-            }.onFailure { e ->
-                snackbar.showSnackbar("导入失败：${e.message ?: "无法读取这张图片"}")
-            }
-        }
+        wallpaperCropUri = uri
+        showWallpaperCrop = true
     })
 
     Scaffold(
@@ -180,6 +173,23 @@ fun AppearanceRoute(
                 }
             }
         }
+    }
+
+    if (showWallpaperCrop && wallpaperCropUri != null) {
+        ImageCropperDialog(
+            uri = wallpaperCropUri!!,
+            shape = CropShape.Rect,
+            outputDir = ImageStore.wallpaperDir(context),
+            prefix = "wallpaper",
+            onConfirm = { file ->
+                vm.setWallpaper(file.absolutePath)
+                ImageStore.clearDirExcept(ImageStore.wallpaperDir(context), file)
+                showWallpaperCrop = false
+                wallpaperCropUri = null
+                scope.launch { snackbar.showSnackbar("壁纸已设置（裁剪无损 · ${ImageStore.prettySize(file.length())}）") }
+            },
+            onDismiss = { showWallpaperCrop = false; wallpaperCropUri = null }
+        )
     }
 }
 
@@ -309,6 +319,38 @@ fun BackupSyncRoute(
     var davSyncing by remember { mutableStateOf(false) }
     var davPulling by remember { mutableStateOf(false) }
 
+    val autoSync by vm.autoSync.collectAsStateWithLifecycle(initialValue = true)
+    val lastSyncAt by vm.lastSyncAt.collectAsStateWithLifecycle(initialValue = "")
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val text = vm.exportJson()
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(text.toByteArray(Charsets.UTF_8))
+                }
+                snackbar.showSnackbar("已导出备份")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("导出失败：${e.message}")
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText() ?: ""
+                vm.importJson(text)
+                snackbar.showSnackbar("已导入备份")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("导入失败：${e.message}")
+            }
+        }
+    }
+
     if (showDavConfig) {
         WebDavConfigDialog(
             initial = vm.parseWebdavConfig(webdavConfigJson),
@@ -363,7 +405,60 @@ fun BackupSyncRoute(
                     )
                     Button(onClick = { showDavConfig = true }, modifier = Modifier.fillMaxWidth()) { Text("配置 WebDAV 服务器") }
                     Text(
-                        "手动同步入口在「设置」主页；这里只负责填写服务器信息。",
+                        "填写服务器信息后，在下方手动同步，或在「外观/通用」页设置自动同步。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("手动同步", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    val cfg = vm.parseWebdavConfig(webdavConfigJson)
+                    Text(
+                        "当前：${if (cfg.url.isBlank()) "未配置" else cfg.url}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                davTesting = true
+                                scope.launch { val r = vm.testDav(cfg); davTesting = false; snackbar.showSnackbar(r) }
+                            },
+                            enabled = !davTesting,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (davTesting) CircularProgressIndicator(Modifier.size(18.dp)) else Text("测试连接")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                davSyncing = true
+                                scope.launch { val r = vm.syncToDav(cfg); davSyncing = false; snackbar.showSnackbar(r) }
+                            },
+                            enabled = !davSyncing,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (davSyncing) CircularProgressIndicator(Modifier.size(18.dp)) else Text("推送到云端")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            davPulling = true
+                            scope.launch { val r = vm.syncFromDav(cfg); davPulling = false; snackbar.showSnackbar(r) }
+                        },
+                        enabled = !davPulling,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (davPulling) CircularProgressIndicator(Modifier.size(18.dp)) else Text("从云端拉取")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("自动同步（启动拉取 / 切后台推送）", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        OnOffSwitch(checked = autoSync, onCheckedChange = { vm.setAutoSync(it) })
+                    }
+                    Text(
+                        if (lastSyncAt.isBlank()) "尚未同步过"
+                        else "上次同步：${lastSyncAt.take(19).replace('T', ' ')}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -420,6 +515,20 @@ fun BackupSyncRoute(
                             }
                         }
                     }
+                }
+            }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("导出 / 导入备份", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { exportLauncher.launch("earth-online-backup.json") }, modifier = Modifier.weight(1f)) { Text("导出备份") }
+                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }, modifier = Modifier.weight(1f)) { Text("导入备份") }
+                    }
+                    Text(
+                        "导入采用按主键合并：同一条数据以备份为准，本地新增的部分保留（与网页端一致）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {

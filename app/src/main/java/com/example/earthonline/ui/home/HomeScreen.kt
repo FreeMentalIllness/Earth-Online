@@ -10,8 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,6 +19,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
+import com.example.earthonline.data.local.entity.ActivityEntity
+import com.example.earthonline.util.millisToDayStr
+import com.example.earthonline.util.todayStr
 import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.EmptyHint
 import com.example.earthonline.ui.components.MoreMenuActions
@@ -43,10 +45,18 @@ import com.example.earthonline.ui.components.UiDimens
 import com.example.earthonline.ui.components.UserAvatar
 import com.example.earthonline.ui.theme.AmberPrimary
 
-/** 主页 LazyColumn 中「人生时间轴」卡片的位置（0 基），供头像卡片「时光机」按钮滚动定位 */
-private const val TIMELINE_INDEX = 7
+/** 主页 LazyColumn 中「人生时间轴」卡片的位置（0 基），供卡片内的「添加里程碑」定位 */
 
-/** 首页入口（对应 HTML renderHome） */
+/** 首页入口定义（对应 HTML renderHome 顶部功能入口）。
+ *  仅保留：任务 / 背包 / 成就 / 地图 / 记账 / 系统，去除与下方卡片重复的「新建任务」「记心情」等入口。 */
+private data class HomeEntry(
+    val icon: String,
+    val label: String,
+    val sub: String,
+    /** route 为空表示「记账」：不走页面导航，改为弹出下载渠道弹窗 */
+    val route: String?
+)
+
 @Composable
 fun HomeRoute(
     onNavigate: (String) -> Unit,
@@ -62,6 +72,9 @@ fun HomeRoute(
         moreActions = moreActions,
         onAddMemo = vm::addQuickMemo,
         onDeleteMemo = vm::deleteMemo,
+        onAddTimelineEvent = vm::addCustomTimelineEvent,
+        onDeleteTimelineEvent = vm::deleteCustomTimelineEvent,
+        onFeedKindsChange = vm::setFeedKinds,
         query = query,
         results = results,
         onQueryChange = vm::setQuery,
@@ -80,6 +93,9 @@ fun HomeScreen(
     moreActions: MoreMenuActions,
     onAddMemo: (String, String) -> Unit,
     onDeleteMemo: (String) -> Unit,
+    onAddTimelineEvent: (String, String, String) -> Unit = { _, _, _ -> },
+    onDeleteTimelineEvent: (String) -> Unit = {},
+    onFeedKindsChange: (Set<String>) -> Unit = {},
     /** v1.2.1 全局搜索：当前词 / 命中项 / 改词 / 点中结果 */
     query: String = "",
     results: List<SearchHit> = emptyList(),
@@ -87,9 +103,6 @@ fun HomeScreen(
     onPickResult: (SearchHit) -> Unit = {}
 ) {
     val context = LocalContext.current
-    // v1.2.3：头像卡片上的「时光机」按钮滚动到人生时间轴卡片（把低频入口上移、提前曝光）
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     var memoInput by remember { mutableStateOf("") }
     var memoType by remember { mutableStateOf("note") }
 
@@ -103,11 +116,12 @@ fun HomeScreen(
         else Toast.makeText(context, "没有麦克风权限，请在系统设置中开启", Toast.LENGTH_SHORT).show()
     }
 
+    var showAddTimeline by remember { mutableStateOf(false) }
+
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         // v1.2.1：世界日志输入框在页面中部，键盘弹起时若不收缩可视高度，
         // 输入框会被键盘整个盖住（用户看不到自己在打什么）。imePadding 让列表底部腾出键盘高度。
-        state = listState,
         modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(
             start = UiDimens.ScreenPad,
@@ -131,21 +145,12 @@ fun HomeScreen(
         item(key = "hero", contentType = "hero") {
             HeroBanner(
                 state = state,
-                onAvatarClick = { onNavigate("profile") },
-                onTimeline = { scope.launch { listState.scrollToItem(TIMELINE_INDEX) } }
+                onAvatarClick = { onNavigate("profile") }
             )
         }
 
         item(key = "overview", contentType = "overview") {
-            OverviewGrid(state = state, onNavigate = onNavigate)
-        }
-
-        item(key = "quick", contentType = "quick") {
-            QuickGrid(
-                onNavigate = onNavigate,
-                onAccounting = moreActions.onAccounting,
-                onPickMood = { mood -> onAddMemo(mood, "mood") }
-            )
+            OverviewGrid(state = state, onNavigate = onNavigate, onAccounting = moreActions.onAccounting)
         }
 
         item(key = "worldlog", contentType = "card") {
@@ -206,77 +211,20 @@ fun HomeScreen(
         }
 
         item(key = "acts", contentType = "card") {
-            Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionHeader("⚡ 最近动态")
-                    if (state.recentActs.isEmpty()) {
-                        EmptyHint("暂无动态，去完成任务或解锁成就试试")
-                    } else {
-                        state.recentActs.forEach { act ->
-                            val icon = when (act.kind) {
-                                "ach" -> "🏆"; "task" -> "📋"; "item" -> "🎒"; else -> "💭"
-                            }
-                            val verb = when (act.kind) {
-                                "ach" -> "解锁成就"; "task" -> "完成任务"; "item" -> "获得物品"; else -> "记录"
-                            }
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(act.time.take(10), style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(icon)
-                                Text(
-                                    "$verb「${act.title}」",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            ActsCard(
+                acts = state.recentActs,
+                feedKinds = state.feedKinds,
+                onFeedKindsChange = onFeedKindsChange
+            )
         }
 
         item(key = "timeline", contentType = "card") {
-            Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionHeader("🕰 人生时间轴")
-                    if (state.timeline.isEmpty()) {
-                        EmptyHint("还没有重要事件，去完成任务、解锁成就或标记足迹吧")
-                    } else {
-                        state.timeline.forEach { item ->
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(timelineColor(item.kind))
-                                )
-                                Text(item.day, style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    when (item.kind) { "ach" -> "🏆"; "loc" -> "🗺️"; else -> "📋" }
-                                )
-                                Text(
-                                    item.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            TimelineCard(
+                items = state.timeline,
+                customIds = state.customTimeline.map { it.key }.toSet(),
+                onAdd = { showAddTimeline = true },
+                onDelete = onDeleteTimelineEvent
+            )
         }
 
         item(key = "lifecard", contentType = "card") {
@@ -315,6 +263,17 @@ fun HomeScreen(
                 }
             )
         }
+
+        // 时间轴：添加自定义里程碑
+        if (showAddTimeline) {
+            AddTimelineDialog(
+                onDismiss = { showAddTimeline = false },
+                onConfirm = { title, day, note ->
+                    onAddTimelineEvent(title, day, note)
+                    showAddTimeline = false
+                }
+            )
+        }
     }
 }
 
@@ -330,7 +289,9 @@ private fun startVoice(
     )
 }
 
-/** 无可用语音识别服务时的手动输入弹窗（国内机型的降级方案） */
+/**
+ * 无可用语音识别服务时的手动输入弹窗（国内机型的降级方案）
+ */
 @Composable
 private fun VoiceFallbackDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
@@ -473,7 +434,7 @@ private fun HomeTitleBar(actions: MoreMenuActions) {
 }
 
 @Composable
-private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit, onTimeline: () -> Unit = {}) {
+private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit) {
     Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.padding(16.dp).fillMaxWidth(),
@@ -532,14 +493,6 @@ private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit, onTimeline
                     progress = if (state.life.hasBirth) state.life.progress else 0f,
                     modifier = Modifier.width(88.dp)
                 )
-                Spacer(Modifier.height(6.dp))
-                TextButton(
-                    onClick = onTimeline,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(28.dp)
-                ) {
-                    Text("🕰 时光机", style = MaterialTheme.typography.labelSmall)
-                }
             }
         }
     }
@@ -605,216 +558,310 @@ private fun AvatarWithBadge(
 }
 
 @Composable
-/**
- * v1.2.0：四张卡严格等高。
- * 之前每张卡的文案行数不同（任务 3 行 / 灵感 1 行），Row 按内容撑高 → 四卡高度参差。
- * 现在两行都锁在同一高度 [UiDimens.OverviewCardHeight]，卡内 fillMaxHeight，
- * 文案统一三行（不足的补占位），视觉上就是四块一样的格子。
- */
-private fun OverviewGrid(state: HomeUiState, onNavigate: (String) -> Unit) {
-    val cardHeight = UiDimens.OverviewCardHeight
+private fun OverviewGrid(
+    state: HomeUiState,
+    onNavigate: (String) -> Unit,
+    onAccounting: () -> Unit
+) {
+    val entries = listOf(
+        HomeEntry("📋", "任务", "完成率 ${state.doneRatio}%", "tasks"),
+        HomeEntry("🎒", "背包", "${state.itemCount} 件物品", "backpack"),
+        HomeEntry("🏆", "成就", "${state.unlockedAch}/${state.totalAch}", "achievements"),
+        HomeEntry("🗺️", "地图", "${state.locationCount} 处足迹", "map"),
+        HomeEntry("📊", "记账", "账本与导出", null),
+        HomeEntry("🤖", "系统", "AI 助手", "ai")
+    )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.height(cardHeight)
-        ) {
-            OverviewCard(
-                icon = "📋", label = "任务",
-                lines = listOf("总数 ${state.totalTasks}", "已完成 ${state.doneTasks}", "完成率 ${state.doneRatio}%"),
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            ) { onNavigate("tasks") }
-            OverviewCard(
-                icon = "🎒", label = "背包",
-                lines = listOf("物品 ${state.itemCount}", "分类 ${state.itemCategoryCount}", "收藏 ${state.collectionCount}"),
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            ) { onNavigate("backpack") }
-        }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.height(cardHeight)
-        ) {
-            OverviewCard(
-                icon = "🏆", label = "成就",
-                lines = listOf("已解锁 ${state.unlockedAch}", "总 ${state.totalAch}", "进度 ${state.achRatio}%"),
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            ) { onNavigate("achievements") }
-            OverviewCard(
-                icon = "📝", label = "世界日志",
-                lines = listOf("共 ${state.totalMemos} 条", "今日 ${state.todayMemoCount} 条", state.latestMemo),
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            ) { onNavigate("data") }
+        entries.chunked(3).forEach { rowEntries ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                rowEntries.forEach { entry ->
+                    HomeEntryTile(
+                        entry = entry,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (entry.route != null) onNavigate(entry.route) else onAccounting()
+                    }
+                }
+                // 末行不足 3 个时用空白占位，保持左右对齐
+                repeat(3 - rowEntries.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OverviewCard(
-    icon: String,
-    label: String,
-    lines: List<String>,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
+private fun HomeEntryTile(entry: HomeEntry, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(UiDimens.ItemRadius),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = modifier
+        modifier = modifier.height(76.dp)
     ) {
         Column(
-            Modifier.padding(12.dp).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            Modifier.fillMaxSize().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.Start
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(icon, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(6.dp))
-                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(entry.icon, style = MaterialTheme.typography.titleMedium)
+            Text(entry.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                entry.sub,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * 最近动态：顶部增加显示类型筛选（任务 / 成就 / 物品 / 记录），用户可自定义显示内容。
+ * 筛选状态由 HomeViewModel 经 DataStore 持久化。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActsCard(
+    acts: List<ActivityEntity>,
+    feedKinds: Set<String>,
+    onFeedKindsChange: (Set<String>) -> Unit
+) {
+    val allKinds = listOf(
+        "task" to "任务",
+        "ach" to "成就",
+        "item" to "物品",
+        "memo" to "记录"
+    )
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                SectionHeader("⚡ 最近动态")
             }
-            lines.forEach { line ->
-                Text(
-                    line,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                allKinds.forEach { (kind, label) ->
+                    val selected = kind in feedKinds
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            val next = if (selected) feedKinds - kind else feedKinds + kind
+                            onFeedKindsChange(next)
+                        },
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.height(30.dp)
+                    )
+                }
+            }
+            if (acts.isEmpty()) {
+                EmptyHint("暂无动态，去完成任务或解锁成就试试")
+            } else {
+                acts.forEach { act ->
+                    val (icon, verb) = when (act.kind) {
+                        "ach" -> "🏆" to "解锁成就"
+                        "task" -> "📋" to "完成任务"
+                        "item" -> "🎒" to "获得物品"
+                        else -> "💭" to "记录"
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(act.time.take(10), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(icon)
+                        Text(
+                            "$verb「${act.title}」",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * 快速入口。v1.2.0：固定 8 个（两行四列）。
- * - route 为空表示「记账」：不走页面导航，改为弹出下载渠道弹窗
- * - route = MOOD_ROUTE 表示「心情」：弹心情选择器，选完直接记一条 mood 日志
+ * 人生时间轴：在自动事件之外，允许用户添加自定义里程碑（「+」按钮），并可删除自定义项。
+ * 自定义事件由 HomeViewModel 经 DataStore 持久化（不改动 Room 表结构）。
  */
-private const val MOOD_ROUTE = "__mood__"
-
-private data class QuickEntry(
-    val icon: String,
-    val label: String,
-    val route: String?
-)
-
-private val QUICK_ENTRIES = listOf(
-    QuickEntry("📝", "新建任务", "new_task"),
-    QuickEntry("🎭", "记心情", MOOD_ROUTE),
-    QuickEntry("🤖", "系统", "ai"),
-    QuickEntry("📊", "记账", null),
-    QuickEntry("🏆", "成就", "achievements"),
-    QuickEntry("🗺️", "足迹", "map")
-)
-
-/** 心情选项（与 Web 端 MOOD_CHOICES 一致） */
-private val MOOD_CHOICES = listOf(
-    "😄 开心", "😌 平静", "🥱 疲惫", "😤 上头",
-    "😢 难过", "🤯 爆炸", "🥳 庆祝", "😴 摆烂"
-)
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QuickGrid(
-    onNavigate: (String) -> Unit,
-    onAccounting: () -> Unit,
-    onPickMood: (String) -> Unit
+private fun TimelineCard(
+    items: List<TimelineItem>,
+    customIds: Set<String>,
+    onAdd: () -> Unit,
+    onDelete: (String) -> Unit
 ) {
-    var showMood by remember { mutableStateOf(false) }
-    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        shape = RoundedCornerShape(UiDimens.CardRadius),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionHeader("⚡ 快速入口")
-            QUICK_ENTRIES.chunked(3).forEach { rowItems ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    rowItems.forEach { entry ->
-                        QuickTile(entry, Modifier.weight(1f)) {
-                            when (entry.route) {
-                                null -> onAccounting()
-                                MOOD_ROUTE -> showMood = true
-                                else -> onNavigate(entry.route)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(
+                        color = AmberPrimary.copy(alpha = 0.16f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) { Text("🕰", style = MaterialTheme.typography.labelMedium) }
+                    }
+                    Text("人生时间轴", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+                IconButton(onClick = onAdd, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Filled.Add, contentDescription = "添加里程碑", tint = AmberPrimary)
+                }
+            }
+            if (items.isEmpty()) {
+                EmptyHint("还没有重要事件，点右上角 + 记录一个里程碑吧")
+            } else {
+                items.forEach { item ->
+                    val isCustom = item.key in customIds
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(timelineColor(item.kind))
+                        )
+                        Text(item.day, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            when (item.kind) { "ach" -> "🏆"; "loc" -> "🗺️"; "custom" -> "⭐"; else -> "📋" }
+                        )
+                        Text(
+                            item.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isCustom) {
+                            IconButton(onClick = { onDelete(item.key) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
-                    repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
     }
-    if (showMood) {
-        MoodPickerDialog(
-            onDismiss = { showMood = false },
-            onPick = { mood ->
-                showMood = false
-                onPickMood(mood)
-            }
-        )
-    }
-}
-
-/** 心情选择器：点一下就记一条 mood 类型的世界日志，不用打字 */
-@Composable
-private fun MoodPickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
-    AnimatedAlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("🎭 记一笔心情") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "选一个就行，会记进世界日志并归类为「心情」——和写日志时选的「心情」分类是同一种记录，只是这里不用打字。纯表情的记录还有隐藏彩蛋哦。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                MOOD_CHOICES.chunked(4).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { mood ->
-                            val emoji = mood.substringBefore(" ")
-                            val label = mood.substringAfter(" ")
-                            OutlinedButton(
-                                onClick = { onPick("$emoji $label") },
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(emoji, style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onDismiss) { Text("取消") } }
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QuickTile(entry: QuickEntry, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
-        modifier = modifier
-    ) {
-        Column(
-            Modifier.padding(vertical = 10.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(entry.icon, style = MaterialTheme.typography.titleMedium)
-            Text(
-                entry.label,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+private fun AddTimelineDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (title: String, day: String, note: String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var day by remember { mutableStateOf(todayStr()) }
+    var note by remember { mutableStateOf("") }
+    var showDate by remember { mutableStateOf(false) }
+    AnimatedAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🕰 添加里程碑") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it.take(40) }, label = { Text("标题") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(day, {}, readOnly = true, label = { Text("日期") },
+                    trailingIcon = { IconButton({ showDate = true }) { Icon(Icons.Filled.DateRange, null) } },
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(note, { note = it.take(200) }, label = { Text("备注（可选）") },
+                    modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(title.trim(), day, note.trim()) },
+                enabled = title.isNotBlank()
+            ) { Text("添加") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } }
+    )
+    if (showDate) {
+        val state = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDate = false },
+            confirmButton = { TextButton(onClick = {
+                state.selectedDateMillis?.let { day = millisToDayStr(it) }
+                showDate = false
+            }) { Text("确定") } },
+            dismissButton = { TextButton({ showDate = false }) { Text("取消") } }
+        ) { DatePicker(state) }
+    }
+}
+
+@Composable
+private fun LifeCard(
+    name: String,
+    level: Int,
+    unlockedAch: Int,
+    locationCount: Int,
+    doneRatio: Int,
+    onShare: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionHeader("🌍 地球Online · 人生卡片")
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                LifeStat("Lv.$level", "等级")
+                LifeStat("$unlockedAch", "成就")
+                LifeStat("$locationCount", "足迹")
+                LifeStat("$doneRatio%", "完成率")
+            }
+            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("分享人生卡片")
+            }
         }
     }
+}
+
+@Composable
+private fun LifeStat(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = AmberPrimary)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun timelineColor(kind: String) = when (kind) {
+    "ach" -> AmberPrimary
+    "loc" -> MaterialTheme.colorScheme.tertiary
+    "custom" -> MaterialTheme.colorScheme.secondary
+    else -> MaterialTheme.colorScheme.primary
 }
 
 private val MEMO_TYPES = listOf(
@@ -867,50 +914,4 @@ private fun MemoRow(text: String, type: String, time: String, onDelete: () -> Un
             Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(16.dp))
         }
     }
-}
-
-@Composable
-private fun LifeCard(
-    name: String,
-    level: Int,
-    unlockedAch: Int,
-    locationCount: Int,
-    doneRatio: Int,
-    onShare: () -> Unit
-) {
-    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SectionHeader("🌍 地球Online · 人生卡片")
-            Text(name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                LifeStat("Lv.$level", "等级")
-                LifeStat("$unlockedAch", "成就")
-                LifeStat("$locationCount", "足迹")
-                LifeStat("$doneRatio%", "完成率")
-            }
-            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("分享人生卡片")
-            }
-        }
-    }
-}
-
-@Composable
-private fun LifeStat(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = AmberPrimary)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun timelineColor(kind: String) = when (kind) {
-    "ach" -> AmberPrimary
-    "loc" -> MaterialTheme.colorScheme.tertiary
-    else -> MaterialTheme.colorScheme.primary
 }

@@ -141,7 +141,10 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                         BarChart(
                             items = byDay.map { BarItem(it.day.takeLast(2), it.count) },
                             averageValue = avgActive,
-                            averageLabel = if (avgActive > 0) "历史均值 $avgActive" else null
+                            averageLabel = if (avgActive > 0) "历史均值 $avgActive" else null,
+                            emptyLabel = "近 14 天还没有记录",
+                            emptyHint = "完成任务或写一条世界日志，这里会显示你的活跃度曲线",
+                            skeletonCount = 14
                         )
                     }
                 }
@@ -151,7 +154,10 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                     Column(Modifier.fillMaxWidth().padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionHeader("任务分类分布")
                         BarChart(
-                            items = byCat.map { BarItem(categoryLabels[it.first] ?: it.first, it.second) }
+                            items = byCat.map { BarItem(categoryLabels[it.first] ?: it.first, it.second) },
+                            emptyLabel = "还没有任务分类数据",
+                            emptyHint = "添加并归类任务后，这里会显示各分类的占比骨架",
+                            skeletonCount = 5
                         )
                     }
                 }
