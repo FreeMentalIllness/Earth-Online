@@ -46,8 +46,10 @@ class EarthOnlineApp : Application(), Configuration.Provider {
         super.onCreate()
         // 高德地图隐私合规：必须在任何 MapView 创建前同意隐私政策，否则新版 SDK 会抛异常导致地图闪退。
         // 放在 Application 启动处一次性同意，覆盖所有地图入口。
+        // 参数必须为 (true, true)：表示隐私政策包含高德相关内容声明 + 调整说明；
+        // 传 (false, false) 会导致 SDK 报 errorCode 555571「隐私合规校验失败」→ 瓦片拒绝加载（白屏）。
         runCatching { MapsInitializer.updatePrivacyAgree(this, true) }
-        runCatching { MapsInitializer.updatePrivacyShow(this, false, false) }
+        runCatching { MapsInitializer.updatePrivacyShow(this, true, true) }
         // 通知渠道随应用启动创建（权限未授予也不影响渠道存在）
         ReminderScheduler.createChannel(this)
         // 若用户此前已开启到期提醒，重启应用后重新调度每日闹钟

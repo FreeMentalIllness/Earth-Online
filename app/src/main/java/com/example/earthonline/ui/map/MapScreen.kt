@@ -223,8 +223,9 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                     factory = { ctx ->
                         // 隐私合规：必须在创建 MapView 之前同意隐私政策（否则新版 SDK 会抛异常）。
                         // Application.onCreate 已初始化过，这里再做一次幂等兜底。
+                        // 参数必须 (true, true)：(false, false) 会触发 errorCode 555571 白屏。
                         runCatching { MapsInitializer.updatePrivacyAgree(ctx, true) }
-                        runCatching { MapsInitializer.updatePrivacyShow(ctx, false, false) }
+                        runCatching { MapsInitializer.updatePrivacyShow(ctx, true, true) }
                         // 创建 MapView；失败标记写入普通对象 MapRef（严禁在组合期写 Compose State！）
                         val mv: MapView? = try {
                             MapView(ctx).apply { onCreate(null) }
