@@ -509,7 +509,7 @@ private fun HomeTitleBar(actions: MoreMenuActions, greeting: String) {
 
 @Composable
 private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit) {
-    Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.padding(16.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -797,13 +797,22 @@ private fun ActsCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 SectionHeader("⚡ 最近动态")
-                IconButton(onClick = { showConfig = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Filled.Settings,
-                        contentDescription = "自定义最近动态",
-                        tint = AmberPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                // 对比度修复：原透明 IconButton 的琥珀图标与米白卡片几乎同色、无法辨认，
+                // 改为暖棕实心圆角按钮 + 白色图标（主题对比色，深浅色模式都清晰可辨）。
+                Surface(
+                    onClick = { showConfig = true },
+                    color = AmberPrimary,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = "自定义最近动态",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 

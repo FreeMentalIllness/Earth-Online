@@ -16,7 +16,10 @@ coil = "2.7.0"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
 serialization = "1.7.3"
-amap = "9.1.0"
+# v1.0.3：9.1.0 → 10.0.600。真实崩溃日志定位：v9.1.0 引擎在 Android 12+（模拟器实测 API 37）
+# 上 GlyphLoader 反射 isHighTextContrastEnabled 失败 → 引擎初始化异常（用户真机上致命闪退）。
+# v10 线是官方兼容性修复渠道，包名 com.amap.api.maps 不变，代码零改动。
+amap = "10.0.600"
 material = "1.11.0"
 workmanager = "2.9.1"
 
