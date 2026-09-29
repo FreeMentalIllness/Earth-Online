@@ -99,6 +99,22 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                     StatCard("成就", unlocked, Modifier.weight(1f))
                 }
             }
+            // 「全部动态」入口：与首页最近动态的完整列表页（AllActivitiesRoute）同一目的地
+            item {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.CardRadius)) {
+                    TextButton(
+                        onClick = { moreActions.onNavigate(Screen.AllActivities.route) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = AmberPrimary)
+                    ) {
+                        Text(
+                            "📜 查看全部动态 ›",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
             item {
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.CardRadius)) {
                     Column(

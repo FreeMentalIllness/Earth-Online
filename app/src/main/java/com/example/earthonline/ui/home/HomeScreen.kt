@@ -6,6 +6,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -29,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -796,14 +798,32 @@ private fun ActsCard(
                 }
 
                 // 3) 添加自定义动态 + 完整列表入口
+                // 对比度修复：OutlinedButton 容器透明、与面板同色导致无法辨认。
+                // 主操作用 AmberPrimary 实心填充 + 白字；次操作用琥珀描边 + 琥珀字，与背景拉开层次。
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = { showConfig = false; showAdd = true }, modifier = Modifier.weight(1f)) {
+                    Button(
+                        onClick = { showConfig = false; showAdd = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AmberPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
                         Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("添加自定义动态")
+                        Text("添加自定义动态", fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
-                    OutlinedButton(onClick = { showConfig = false; onOpenAll() }, modifier = Modifier.weight(1f)) {
-                        Text("查看全部动态 ›")
+                    OutlinedButton(
+                        onClick = { showConfig = false; onOpenAll() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = AmberPrimary
+                        ),
+                        border = BorderStroke(1.dp, AmberPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("查看全部动态 ›", maxLines = 1)
                     }
                 }
             }
