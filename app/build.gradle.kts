@@ -60,10 +60,10 @@ android {
            同一套 Compose 代码在 debug 与 release 上的帧率差距可以到 2~3 倍。
            所以「体感卡顿」首先要排除 debug 包因素，测流畅度请用 staging / release。 */
         release {
-            // 关闭 R8 压缩/优化：R8 8.5.35 的 tree-shaking 在合并 WorkManager/Hilt 生成代码时
-            // 会触发内部 ConcurrentModificationException（shaking.M），且无可靠 workaround。
-            // 关闭后 APK 不混淆/不瘦身（体积更大），但可正常构建安装，功能不受影响。
-            isMinifyEnabled = false
+            // R8 代码压缩/混淆开启：R8 8.5.35 的 shaking 期 CME 已通过「AGP 升级至 8.7.3（R8 8.7.x）
+            // + proguard-rules.pro 保留 Hilt/WorkManager/Room/高德生成类」两处规避，不再以关闭混淆回退。
+            // 资源压缩（shrinkResources）保持关闭：Compose 资源与动态资源名易被误删，风险大于收益。
+            isMinifyEnabled = true
             isShrinkResources = false
             isDebuggable = false
             // 未配置正式签名时回退调试签名：保证 assembleRelease 产物可直接装机，
