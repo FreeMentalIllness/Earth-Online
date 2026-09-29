@@ -86,6 +86,12 @@ fun AppearanceRoute(
     val wallpaper by vm.wallpaper.collectAsStateWithLifecycle(initialValue = "")
     val wallpaperAlpha by vm.wallpaperAlpha.collectAsStateWithLifecycle(initialValue = 0.35f)
     val fontScale by vm.fontScale.collectAsStateWithLifecycle(initialValue = "std")
+    // v1.0.3：壁纸从记忆相册随机轮换
+    val wallpaperRotate by vm.wallpaperRotate.collectAsStateWithLifecycle(initialValue = false)
+    val memoryPhotosJson by vm.memoryPhotosJson.collectAsStateWithLifecycle(initialValue = "")
+    val albumCount = remember(memoryPhotosJson) {
+        Regex("\"path\"").findAll(memoryPhotosJson).count()
+    }
 
     /* v1.2.4：壁纸导入改为「先选图 → 裁剪框缩放/移动（铺满屏幕）→ 确认」，
        裁剪输出无损 PNG（见 ui/components/ImageCropper.kt）。 */
@@ -158,6 +164,25 @@ fun AppearanceRoute(
                             valueRange = 0.05f..0.9f
                         )
                     }
+                    // v1.0.3：动态主页背景 —— 从记忆相册随机轮换（每天一张，确定性挑选）
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text("从记忆相册轮换壁纸", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                if (albumCount == 0) "先在数据页「记忆相册」导入照片"
+                                else "每天自动从 ${albumCount} 张照片里换一张",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = wallpaperRotate && albumCount > 0,
+                            onCheckedChange = {
+                                if (albumCount > 0) vm.setWallpaperRotate(it)
+                            },
+                            enabled = albumCount > 0
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text("字号", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -206,18 +231,43 @@ fun GeneralRoute(
 
     val notify by vm.notify.collectAsStateWithLifecycle(initialValue = false)
     val achSound by vm.achSound.collectAsStateWithLifecycle(initialValue = true)
+    // v1.0.3：通知栏快捷记录开关
+    val quickNotif by vm.quickNotif.collectAsStateWithLifecycle(initialValue = false)
     val aiConfigJson by vm.aiConfigJson.collectAsStateWithLifecycle(initialValue = "")
 
     var showAiConfig by remember { mutableStateOf(false) }
+
+    // 记录权限请求的发起方（到期提醒 / 快捷记录），回调里据此分别处理
+    var pendingQuickNotif by remember { mutableStateOf(false) }
 
     val postNotifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            vm.setNotify(true)
-            ReminderScheduler.schedule(context)
+            if (pendingQuickNotif) {
+                vm.setQuickNotif(true)
+            } else {
+                vm.setNotify(true)
+                ReminderScheduler.schedule(context)
+            }
+            pendingQuickNotif = false
         } else {
-            scope.launch { snackbar.showSnackbar("未授予通知权限，无法发送到期提醒") }
+            scope.launch { snackbar.showSnackbar("未授予通知权限，无法开启该功能") }
+        }
+    }
+
+    fun onQuickNotifToggle(want: Boolean) {
+        if (want) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                when (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)) {
+                    PackageManager.PERMISSION_GRANTED -> vm.setQuickNotif(true)
+                    else -> { pendingQuickNotif = true; postNotifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+                }
+            } else {
+                vm.setQuickNotif(true)
+            }
+        } else {
+            vm.setQuickNotif(false)
         }
     }
 
@@ -269,6 +319,19 @@ fun GeneralRoute(
                             )
                         }
                         OnOffSwitch(checked = notify, onCheckedChange = { onNotifyToggle(it) })
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // v1.0.3：通知栏常驻「快捷记录」按钮
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text("通知栏快捷记录", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                "在通知栏常驻一个「记录这一刻」入口，点一下就能写日志",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OnOffSwitch(checked = quickNotif, onCheckedChange = { onQuickNotifToggle(it) })
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {

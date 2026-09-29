@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,8 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -82,6 +85,8 @@ fun HomeRoute(
         onFeedKindsChange = vm::setFeedKinds,
         onFeedLimitChange = vm::setFeedLimit,
         onAddCustomActivity = vm::addCustomActivity,
+        onThrowbackSeen = vm::onThrowbackSeen,
+        onToggleBadge = vm::toggleBadge,
         query = query,
         results = results,
         onQueryChange = vm::setQuery,
@@ -106,6 +111,9 @@ fun HomeScreen(
     /** 最近动态：首页显示条数（0 = 不限）与自定义动态添加 */
     onFeedLimitChange: (Int) -> Unit = {},
     onAddCustomActivity: (String) -> Unit = {},
+    /** v1.0.3：翻开「历年今日」卡（彩蛋计数） / 佩戴徽章切换 */
+    onThrowbackSeen: () -> Unit = {},
+    onToggleBadge: (String) -> Unit = {},
     /** v1.2.1 全局搜索：当前词 / 命中项 / 改词 / 点中结果 */
     query: String = "",
     results: List<SearchHit> = emptyList(),
@@ -141,7 +149,12 @@ fun HomeScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(UiDimens.Gap)
     ) {
-        item(key = "titlebar", contentType = "titlebar") { HomeTitleBar(actions = moreActions) }
+        item(key = "titlebar", contentType = "titlebar") {
+            HomeTitleBar(
+                actions = moreActions,
+                greeting = state.greeting
+            )
+        }
 
         item(key = "search", contentType = "search") {
             HomeSearchBox(
@@ -157,6 +170,24 @@ fun HomeScreen(
                 state = state,
                 onAvatarClick = { onNavigate("profile") }
             )
+        }
+
+        // v1.0.3：历年今日 —— 去年今天留下的记录，有内容才出现
+        if (state.throwback.isNotEmpty()) {
+            item(key = "throwback", contentType = "card") {
+                ThrowbackCard(
+                    items = state.throwback,
+                    comeback = state.comeback,
+                    onSeen = onThrowbackSeen
+                )
+            }
+        }
+
+        // v1.0.3：今日一签 —— 每天从过去随机展示一条记录
+        state.dailyDraw?.let { draw ->
+            item(key = "dailydraw", contentType = "card") {
+                DailyDrawCard(item = draw)
+            }
         }
 
         item(key = "overview", contentType = "overview") {
@@ -203,12 +234,15 @@ fun HomeScreen(
                         EmptyHint("还没有记录，在上方输入第一条世界日志吧", emoji = "📭")
                     } else {
                         state.recentMemos.forEach { memo ->
-                            MemoRow(
-                                text = memo.text,
-                                type = memo.type,
-                                time = memo.createdAt.take(10),
-                                onDelete = { onDeleteMemo(memo.id) }
-                            )
+                            // key 稳定每个 MemoRow 的滑动状态（增删时不串位）
+                            key(memo.id) {
+                                MemoRow(
+                                    text = memo.text,
+                                    type = memo.type,
+                                    time = memo.createdAt.take(10),
+                                    onDelete = { onDeleteMemo(memo.id) }
+                                )
+                            }
                         }
                         if (state.totalMemos > state.recentMemos.size) {
                             TextButton(onClick = { onNavigate("data") }, modifier = Modifier.fillMaxWidth()) {
@@ -236,6 +270,8 @@ fun HomeScreen(
             TimelineCard(
                 items = state.timeline,
                 customIds = state.customTimeline.map { it.key }.toSet(),
+                streakStage = state.streakStage,
+                streakDays = state.streakDays,
                 onAdd = { showAddTimeline = true },
                 onDelete = onDeleteTimelineEvent
             )
@@ -245,9 +281,13 @@ fun HomeScreen(
             LifeCard(
                 name = state.displayName,
                 level = state.life.age,
+                title = state.customTitle,
                 unlockedAch = state.unlockedAch,
                 locationCount = state.locationCount,
                 doneRatio = state.doneRatio,
+                badges = state.badges,
+                badgePool = state.badgePool,
+                onToggleBadge = onToggleBadge,
                 onShare = {
                     val text = buildString {
                         append("🌍 地球Online 人生卡片\n")
@@ -428,7 +468,9 @@ private fun HomeSearchBox(
 }
 
 @Composable
-private fun HomeTitleBar(actions: MoreMenuActions) {
+private fun HomeTitleBar(actions: MoreMenuActions, greeting: String) {
+    // v1.0.3：季节限定徽章（春樱/夏夜/秋叶/冬雪，按节气近似切分）
+    val season = remember { com.example.earthonline.util.SeasonTheme.current() }
     Row(
         Modifier.fillMaxWidth().padding(top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -436,11 +478,29 @@ private fun HomeTitleBar(actions: MoreMenuActions) {
     ) {
         Text("🌍", style = MaterialTheme.typography.titleLarge)
         Column(Modifier.weight(1f)) {
-            Text("地球Online", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("地球Online", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                // 当季限定徽章
+                Surface(
+                    color = season.accent.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                ) {
+                    Text(
+                        "${season.emoji} ${season.label}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = season.accent,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            // v1.0.3：动态问候语（时间段 + 最近心情关怀 + 连续天数认可）
             Text(
-                "人生记录 · 开放世界",
+                greeting.ifBlank { "人生记录 · 开放世界" },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
         SettingsIconButton(actions = actions)
@@ -460,13 +520,39 @@ private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit) {
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Text(
-                    state.displayName,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        state.displayName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    // v1.0.3：自定义称号徽章
+                    val titleText = com.example.earthonline.util.XpRules.titleFor(state.customTitle)
+                    Surface(
+                        color = AmberPrimary.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            titleText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AmberPrimary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                // v1.0.3：连续记录成长徽标（≥3 天即出现，界面随投入生长）
+                if (state.streakDays >= 3) {
+                    Text(
+                        "🔥 连续记录 ${state.streakDays} 天 · ${com.example.earthonline.util.GrowthStreak.stageLabel(state.streakStage)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AmberPrimary
+                    )
+                }
                 Text(
                     if (state.birthDate.isBlank()) "🎂 未设置生日" else "🎂 ${state.birthDate}",
                     style = MaterialTheme.typography.labelMedium,
@@ -671,6 +757,8 @@ private fun ActsCard(
     var tab by remember { mutableStateOf("all") }
     var showConfig by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
+    // v1.0.3：左右滑动切换分类（手势累计位移，超过阈值即切一格）
+    var dragAcc by remember { mutableStateOf(0f) }
 
     // 筛选逻辑：具体标签 = 单独该类型（标签是显式意图，覆盖启用分类配置）；
     // 「全部」= 按启用分类展示，自定义动态恒显示
@@ -682,7 +770,27 @@ private fun ActsCard(
     val shown = if (feedLimit > 0) filtered.take(feedLimit) else filtered
 
     Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier
+                .padding(UiDimens.CardPad)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragAcc = 0f },
+                        onHorizontalDrag = { change, amount ->
+                            dragAcc += amount
+                            change.consume()
+                        },
+                        onDragEnd = {
+                            val idx = tabKinds.indexOfFirst { it.first == tab }
+                            when {
+                                dragAcc < -90f && idx < tabKinds.size - 1 -> tab = tabKinds[idx + 1].first
+                                dragAcc > 90f && idx > 0 -> tab = tabKinds[idx - 1].first
+                            }
+                        }
+                    )
+                },
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -873,14 +981,111 @@ private fun AddCustomActivityDialog(onDismiss: () -> Unit, onConfirm: (String) -
 }
 
 /**
+ * v1.0.3：历年今日 —— 去年今天留下的日志 / 完成任务 / 足迹。
+ * 有内容才渲染；首次展开会触发彩蛋计数（时光回声）。
+ * 断更鼓励语也放这里：回归的用户先看到「你的星球一直在」。
+ */
+@Composable
+private fun ThrowbackCard(
+    items: List<ThrowbackItem>,
+    comeback: String?,
+    onSeen: () -> Unit
+) {
+    LaunchedEffect(Unit) { onSeen() }
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) { Text("🕰", style = MaterialTheme.typography.labelMedium) }
+                }
+                Text("历年今日", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            }
+            comeback?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            items.forEach { entry ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        when (entry.kind) { "task" -> "📋"; "loc" -> "🗺️"; else -> "💭" },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        entry.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "${entry.day.take(4)}年的今天",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * v1.0.3：今日一签 —— 每天从过去的日志与成就里确定性抽出一条。
+ * 同一天刷新结果一致，明天自动换新，让老内容每天都被重新看见。
+ */
+@Composable
+private fun DailyDrawCard(item: ThrowbackItem) {
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    color = AmberPrimary.copy(alpha = 0.14f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) { Text("🎴", style = MaterialTheme.typography.labelMedium) }
+                }
+                Text("今日一签", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "来自 ${item.day}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.End
+                )
+            }
+            Text(
+                item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
  * 人生时间轴：在自动事件之外，允许用户添加自定义里程碑（「+」按钮），并可删除自定义项。
  * 自定义事件由 HomeViewModel 经 DataStore 持久化（不改动 Room 表结构）。
+ * v1.0.3：连续记录生长机制 —— 阶段徽标随投入升级（萌芽/抽枝/繁茂/参天）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TimelineCard(
     items: List<TimelineItem>,
     customIds: Set<String>,
+    streakStage: Int,
+    streakDays: Int,
     onAdd: () -> Unit,
     onDelete: (String) -> Unit
 ) {
@@ -906,6 +1111,14 @@ private fun TimelineCard(
                         Box(contentAlignment = Alignment.Center) { Text("🕰", style = MaterialTheme.typography.labelMedium) }
                     }
                     Text("人生时间轴", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    // v1.0.3：生长阶段徽标（≥3 天出现，随天数升级）
+                    if (streakStage > 0) {
+                        Text(
+                            com.example.earthonline.util.GrowthStreak.stageLabel(streakStage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AmberPrimary
+                        )
+                    }
                 }
                 IconButton(onClick = onAdd, modifier = Modifier.size(34.dp)) {
                     Icon(Icons.Filled.Add, contentDescription = "添加里程碑", tint = AmberPrimary)
@@ -997,15 +1210,21 @@ private fun AddTimelineDialog(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LifeCard(
     name: String,
     level: Int,
+    title: String,
     unlockedAch: Int,
     locationCount: Int,
     doneRatio: Int,
+    badges: List<BadgeItem>,
+    badgePool: List<BadgeItem>,
+    onToggleBadge: (String) -> Unit,
     onShare: () -> Unit
 ) {
+    var showBadgeManager by remember { mutableStateOf(false) }
     Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionHeader("🌍 地球Online · 人生卡片")
@@ -1024,12 +1243,87 @@ private fun LifeCard(
                 LifeStat("$locationCount", "足迹")
                 LifeStat("$doneRatio%", "完成率")
             }
+            // v1.0.3：徽章墙 —— 佩戴的隐藏/普通成就徽章（最多 3 枚）
+            if (badgePool.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("🎖 徽章墙", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        TextButton(
+                            onClick = { showBadgeManager = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) { Text(if (badges.isEmpty()) "佩戴" else "更换", style = MaterialTheme.typography.labelSmall) }
+                    }
+                    if (badges.isEmpty()) {
+                        Text(
+                            "从已解锁的成就里挑 3 枚戴出来吧",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            badges.forEach { badge ->
+                                Surface(
+                                    color = AmberPrimary.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        "🎖 ${badge.title}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AmberPrimary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("分享人生卡片")
             }
         }
+    }
+
+    // 佩戴徽章管理对话框（最多 3 枚）
+    if (showBadgeManager) {
+        AnimatedAlertDialog(
+            onDismissRequest = { showBadgeManager = false },
+            title = { Text("🎖 佩戴徽章（最多 3 枚）") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(badgePool, key = { it.id }) { badge ->
+                        val worn = badges.any { it.id == badge.id }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Checkbox(checked = worn, onCheckedChange = { onToggleBadge(badge.id) })
+                            Column(Modifier.weight(1f)) {
+                                Text(badge.title, style = MaterialTheme.typography.bodyMedium)
+                                if (badge.desc.isNotBlank()) {
+                                    Text(
+                                        badge.desc,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showBadgeManager = false }) { Text("完成") } }
+        )
     }
 }
 
@@ -1069,6 +1363,7 @@ private fun MemoTypeRow(selected: String, onSelect: (String) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MemoRow(text: String, type: String, time: String, onDelete: () -> Unit) {
     val dot = when (type) {
@@ -1077,26 +1372,59 @@ private fun MemoRow(text: String, type: String, time: String, onDelete: () -> Un
         "mood" -> "🎭"
         else -> "💭"
     }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+    // v1.0.3：右滑删除（M3 SwipeToDismissBox，松手后未过阈值自动回弹）
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.StartToEnd) {
+                onDelete()
+                true
+            } else false
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromEndToStart = false,
+        backgroundContent = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(UiDimens.ItemRadius))
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    "删除",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+        }
     ) {
-        Text(dot, style = MaterialTheme.typography.bodySmall)
-        Text(
-            time,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(16.dp))
+        // 不透明底：防止红色删除背景从内容缝隙里透出来
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(dot, style = MaterialTheme.typography.bodySmall)
+            Text(
+                time,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(16.dp))
+            }
         }
     }
 }

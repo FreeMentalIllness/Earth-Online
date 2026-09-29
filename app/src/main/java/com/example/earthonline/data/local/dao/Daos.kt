@@ -136,6 +136,10 @@ interface ItemDao {
     @Query("SELECT COUNT(DISTINCT category) FROM items WHERE category IS NOT NULL AND category != ''")
     fun categoryCount(): Flow<Int>
 
+    /** v1.0.3 报告：区间内拾取的物品数（createdAt 是 YYYY-MM-DD 日键，闭区间） */
+    @Query("SELECT COUNT(*) FROM items WHERE createdAt >= :fromDay AND createdAt <= :toDay")
+    fun countBetweenDays(fromDay: String, toDay: String): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(i: ItemEntity)
 

@@ -57,6 +57,13 @@ class SettingsViewModel @Inject constructor(
     /** v1.2.1：成就解锁音效开关 */
     val achSound: Flow<Boolean> = settings.achSound
 
+    // v1.0.3：壁纸随机轮换 / 记忆相册 / 通知栏快捷记录
+    val wallpaperRotate: Flow<Boolean> = settings.wallpaperRotate
+    val memoryPhotosJson: Flow<String> = settings.memoryPhotosJson
+    val quickNotif: Flow<Boolean> = settings.quickNotif
+    fun setWallpaperRotate(v: Boolean) = viewModelScope.launch { settings.setWallpaperRotate(v) }
+    fun setQuickNotif(v: Boolean) = viewModelScope.launch { settings.setQuickNotif(v) }
+
     fun setTheme(v: String) = viewModelScope.launch { settings.setTheme(v) }
     fun setFontScale(v: String) = viewModelScope.launch { settings.setFontScale(v) }
     fun setAchSound(v: Boolean) = viewModelScope.launch { settings.setAchSound(v) }

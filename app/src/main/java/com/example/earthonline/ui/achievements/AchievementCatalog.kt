@@ -75,7 +75,10 @@ data class AchStats(
     val maxDoneInDay: Int = 0,      // 单日完成任务峰值
     val recordStreak: Int = 0,      // 连续记录（日志）天数
     val emojiOnlyMemos: Int = 0,    // 纯 emoji 日志
-    val newYearBirth: Int = 0       // 生日是 1 月 1 日
+    val newYearBirth: Int = 0,      // 生日是 1 月 1 日
+    // —— v1.0.3 新增彩蛋 ——
+    val throwbackSeen: Int = 0,     // 查看「历年今日」回忆卡次数（需持久化计数）
+    val memoryPhotos: Int = 0       // 记忆相册已导入照片数
 )
 
 /**
@@ -262,7 +265,13 @@ val AUTO_RULES: List<AutoRule> = listOf(
     AutoRule(
         "egg_newyear", "元旦宝宝", "生日是 1 月 1 日", "egg", 1,
         test = { it.newYearBirth > 0 }
-    ) { it.newYearBirth }
+    ) { it.newYearBirth },
+    AutoRule(
+        "egg_throwback", "时光回声", "翻开一次「历年今日」的旧时光", "egg", 1
+    ) { it.throwbackSeen },
+    AutoRule(
+        "egg_memory_album", "记忆管理员", "往记忆相册导入第一张老照片", "egg", 1
+    ) { it.memoryPhotos }
 )
 
 /**

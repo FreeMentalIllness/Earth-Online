@@ -7,12 +7,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.BarChart
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
@@ -24,6 +28,7 @@ import com.example.earthonline.ui.components.EmptyState
 import com.example.earthonline.ui.navigation.Screen
 import com.example.earthonline.ui.theme.AmberPrimary
 import com.example.earthonline.ui.theme.TextSecondaryLight
+import com.example.earthonline.util.localDayOf
 
 /** 数据看板页（对应 HTML 数据看板：统计卡 + 图表 + 活跃日历） */
 @Composable
@@ -46,6 +51,9 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
     val tasks by vm.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val categoryLabels = mapOf("main" to "主线", "side" to "支线", "todo" to "To Do")
+
+    // v1.0.3：图表点按洞察 —— 点击「近 14 天」某根柱子，弹性展开当日明细
+    var detailDay by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -99,19 +107,37 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                     StatCard("成就", unlocked, Modifier.weight(1f))
                 }
             }
-            // 「全部动态」入口：与首页最近动态的完整列表页（AllActivitiesRoute）同一目的地
+            // 「全部动态」入口：与首页最近动态的完整列表页（AllActivitiesRoute）同一目的地；
+            // v1.0.3：下方并列「记忆相册」入口（批量导入 / 按月归档相册墙）
             item {
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.CardRadius)) {
-                    TextButton(
-                        onClick = { moreActions.onNavigate(Screen.AllActivities.route) },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
-                        colors = ButtonDefaults.textButtonColors(contentColor = AmberPrimary)
-                    ) {
-                        Text(
-                            "📜 查看全部动态 ›",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { moreActions.onNavigate(Screen.AllActivities.route) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = AmberPrimary)
+                        ) {
+                            Text(
+                                "📜 查看全部动态 ›",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        TextButton(
+                            onClick = { moreActions.onNavigate(Screen.Album.route) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = AmberPrimary)
+                        ) {
+                            Text(
+                                "📷 记忆相册 ›",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -160,7 +186,8 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                             averageLabel = if (avgActive > 0) "历史均值 $avgActive" else null,
                             emptyLabel = "近 14 天还没有记录",
                             emptyHint = "完成任务或写一条世界日志，这里会显示你的活跃度曲线",
-                            skeletonCount = 14
+                            skeletonCount = 14,
+                            onBarClick = { index -> detailDay = byDay.getOrNull(index)?.day }
                         )
                     }
                 }
@@ -187,6 +214,39 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                 }
             }
         }
+    }
+    // v1.0.3：当日明细弹窗（点击柱子触发，列出那天完成的任务与发生的动态）
+    detailDay?.let { day ->
+        val dayActs = activities.filter { localDayOf(it.time) == day }
+        val dayTasks = tasks.filter { it.status == "done" && it.doneAt?.let { iso -> localDayOf(iso) } == day }
+        AnimatedAlertDialog(
+            onDismissRequest = { detailDay = null },
+            title = { Text("📅 ${day} 的明细") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (dayActs.isEmpty() && dayTasks.isEmpty()) {
+                        item { Text("这一天没有留下记录", style = MaterialTheme.typography.bodyMedium) }
+                    } else {
+                        item {
+                            Text(
+                                "完成 ${dayTasks.size} 个任务 · ${dayActs.size} 条动态",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        items(dayTasks.size) { i ->
+                            val t = dayTasks[i]
+                            Text("✅ ${t.title.ifBlank { "任务" }}", style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                        }
+                        items(dayActs.size) { i ->
+                            val a = dayActs[i]
+                            Text("• ${a.title}", style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { detailDay = null }) { Text("关闭") } }
+        )
     }
 }
 

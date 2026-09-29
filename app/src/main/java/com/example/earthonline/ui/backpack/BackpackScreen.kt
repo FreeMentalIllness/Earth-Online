@@ -232,8 +232,17 @@ private fun ItemCard(item: ItemEntity, onDelete: (String) -> Unit) {
                     }
                 }
                 if (!item.description.isNullOrBlank()) {
-                    Text(item.description!!, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // v1.0.3：故事卡展示 —— 带书签图标，读起来像一句纪念
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("📖", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            item.description!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             IconButton(onClick = { onDelete(item.id) }) { Icon(Icons.Filled.Delete, contentDescription = "删除") }
@@ -391,7 +400,10 @@ private fun ItemDialog(
                     FilterChip(selected = type == "physical", onClick = { type = "physical" }, label = { Text("实物") })
                     FilterChip(selected = type == "virtual", onClick = { type = "virtual" }, label = { Text("虚拟") })
                 }
-                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("描述") },
+                // v1.0.3：物品故事卡 —— 让背包更像人生纪念品而不是冷数据
+                OutlinedTextField(value = desc, onValueChange = { desc = it },
+                    label = { Text("来源 / 故事") },
+                    placeholder = { Text("它是怎么来到你身边的？") },
                     modifier = Modifier.fillMaxWidth())
                 CategoryPicker(
                     categories = categories,

@@ -55,6 +55,9 @@ object WidgetRenderer {
         fun achRepo(): AchievementRepository
         fun memoRepo(): MemoRepository
         fun locationRepo(): LocationRepository
+        fun itemRepo(): com.example.earthonline.data.repository.ItemRepository
+        fun settings(): com.example.earthonline.data.local.datastore.SettingsDataStore
+        fun json(): kotlinx.serialization.json.Json
     }
 
     /** 刷新所有已添加的小组件。没添加时直接返回（一次 IPC 都不做，这是省电的一部分） */
@@ -81,10 +84,17 @@ object WidgetRenderer {
         val unlocked = fetch(0) { deps.achRepo().unlockedCount().first() }
         val memos = fetch(0) { deps.memoRepo().count().first() }
         val locations = fetch(0) { deps.locationRepo().count().first() }
+        // v1.0.3：经验来源多元化（物品 / 记忆照片），任一失败不影响小组件其余内容
+        val items = fetch(0) { deps.itemRepo().count().first() }
+        val photos = fetch(0) {
+            val txt = deps.settings().memoryPhotosJson.first()
+            runCatching {
+                (deps.json().parseToJsonElement(txt) as? kotlinx.serialization.json.JsonArray)?.size ?: 0
+            }.getOrDefault(0)
+        }
 
         val stats = lifeStatsOf(profile?.birthDate)
-        val xp = doneTasks * XpRules.TASK_DONE + unlocked * XpRules.ACHIEVEMENT +
-            memos * XpRules.MEMO + locations * XpRules.LOCATION
+        val xp = XpRules.totalXp(doneTasks, unlocked, memos, locations, items, photos)
 
         val views = RemoteViews(context.packageName, R.layout.widget_overview)
 

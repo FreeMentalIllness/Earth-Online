@@ -52,6 +52,20 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val HOME_FEED_FILTER = stringPreferencesKey("home_feed_filter")
         /** 主页「最近动态」首页显示条数（0 = 不限制，默认 3） */
         val HOME_FEED_LIMIT = intPreferencesKey("home_feed_limit")
+
+        /* ————— v1.0.3 体验升级批次 ————— */
+        /** 用户自定义称号（空 = 用默认「旅行者」） */
+        val CUSTOM_TITLE = stringPreferencesKey("custom_title")
+        /** 记忆相册照片元数据（JSON 列表；图片文件在 filesDir/photos，不进这里） */
+        val MEMORY_PHOTOS = stringPreferencesKey("memory_photos")
+        /** 主页壁纸从记忆相册随机轮换开关 */
+        val WALLPAPER_ROTATE = booleanPreferencesKey("wallpaper_rotate")
+        /** 主页佩戴徽章（JSON 字符串数组：成就 id，最多 3 枚） */
+        val HOME_BADGES = stringPreferencesKey("home_badges")
+        /** 通知栏常驻「快捷记录」开关 */
+        val QUICK_NOTIF = booleanPreferencesKey("quick_add_notif")
+        /** 彩蛋计数器：查看「历年今日」卡片的次数 */
+        val EGG_THROWBACK = intPreferencesKey("egg_throwback")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -113,4 +127,29 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     suspend fun setCustomTimelineJson(v: String) = ds.edit { it[CUSTOM_TIMELINE] = v }
     suspend fun setHomeFeedFilterJson(v: String) = ds.edit { it[HOME_FEED_FILTER] = v }
     suspend fun setHomeFeedLimit(v: Int) = ds.edit { it[HOME_FEED_LIMIT] = v.coerceIn(0, 200) }
+
+    /* ————— v1.0.3 体验升级批次 ————— */
+
+    val customTitle: Flow<String> = ds.data.map { it[CUSTOM_TITLE] ?: "" }
+    suspend fun setCustomTitle(v: String) = ds.edit { it[CUSTOM_TITLE] = v.trim().take(12) }
+
+    /** 记忆相册元数据（JSON 列表，空串 = 相册为空） */
+    val memoryPhotosJson: Flow<String> = ds.data.map { it[MEMORY_PHOTOS] ?: "" }
+    suspend fun setMemoryPhotosJson(v: String) = ds.edit { it[MEMORY_PHOTOS] = v }
+
+    val wallpaperRotate: Flow<Boolean> = ds.data.map { it[WALLPAPER_ROTATE] ?: false }
+    suspend fun setWallpaperRotate(v: Boolean) = ds.edit { it[WALLPAPER_ROTATE] = v }
+
+    /** 主页佩戴徽章（JSON 字符串数组，空串 = 未佩戴） */
+    val homeBadgesJson: Flow<String> = ds.data.map { it[HOME_BADGES] ?: "" }
+    suspend fun setHomeBadgesJson(v: String) = ds.edit { it[HOME_BADGES] = v }
+
+    val quickNotif: Flow<Boolean> = ds.data.map { it[QUICK_NOTIF] ?: false }
+    suspend fun setQuickNotif(v: Boolean) = ds.edit { it[QUICK_NOTIF] = v }
+
+    /** 彩蛋：查看「历年今日」次数（≥1 解锁「时光回声」） */
+    val eggThrowback: Flow<Int> = ds.data.map { it[EGG_THROWBACK] ?: 0 }
+    suspend fun bumpEggThrowback() = ds.edit {
+        it[EGG_THROWBACK] = ((it[EGG_THROWBACK] ?: 0) + 1).coerceAtMost(999999)
+    }
 }

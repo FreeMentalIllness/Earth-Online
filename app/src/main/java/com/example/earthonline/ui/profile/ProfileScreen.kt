@@ -1,5 +1,6 @@
 package com.example.earthonline.ui.profile
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -83,13 +84,15 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
        预览用 Coil 读文件（避免一张 1080×1440 的 ARGB 位图常驻内存 ≈ 6MB）。 */
     var cardGenerating by remember { mutableStateOf(false) }
     var cardFile by remember { mutableStateOf<java.io.File?>(null) }
+    // v1.0.3：分享卡片模板选择（1 暖米 / 2 深夜 / 3 樱粉）
+    var showTemplatePicker by remember { mutableStateOf(false) }
 
-    fun generateCard() {
+    fun generateCard(template: Int) {
         if (cardGenerating) return
         cardGenerating = true
         scope.launch {
             val file = withContext(Dispatchers.Default) {
-                val bmp = ShareCardRenderer.render(vm.buildCardData(), vm.avatarFile())
+                val bmp = ShareCardRenderer.render(vm.buildCardData(template), vm.avatarFile())
                 try {
                     withContext(Dispatchers.IO) { ShareCardRenderer.saveToCache(context, bmp) }
                 } finally {
@@ -182,6 +185,10 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
                     modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(vm.signature, { vm.signature = it }, label = { Text("个性签名") },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(vm.customTitle, { vm.customTitle = it.take(12) },
+                    label = { Text("称号（可选，如「星尘旅人」）") },
+                    placeholder = { Text("留空显示默认「旅行者」") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
 
                 Text("自定义字段", style = MaterialTheme.typography.titleMedium)
                 vm.customFields.forEachIndexed { idx, cf ->
@@ -206,6 +213,7 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
                 ProfileInfoRow("区服", vm.regionLabel())
                 ProfileInfoRow("出生日期", vm.birthDate.takeIf { it.isNotBlank() } ?: "—")
                 ProfileInfoRow("个性签名", vm.signature.takeIf { it.isNotBlank() } ?: "—")
+                ProfileInfoRow("称号", com.example.earthonline.util.XpRules.titleFor(vm.customTitle))
                 if (vm.customFields.any { it.label.isNotBlank() && it.value.isNotBlank() }) {
                     Text("自定义字段", style = MaterialTheme.typography.titleMedium)
                     vm.customFields.forEach { cf ->
@@ -219,7 +227,7 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
                    把等级 / 成就 / 任务 / 签名 / 头像画成一张 1080×1440 的图，
                    走系统分享（微信、QQ、保存图片…都能接）。 */
                 Button(
-                    onClick = { generateCard() },
+                    onClick = { showTemplatePicker = true },
                     enabled = !cardGenerating,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -324,6 +332,48 @@ fun ProfileScreen(vm: ProfileViewModel, moreActions: MoreMenuActions) {
                     TextButton(onClick = { cardFile = null }) { Text("关闭") }
                 }
             }
+        )
+    }
+
+    // v1.0.3：分享卡片模板选择（生成前先挑一套配色）
+    if (showTemplatePicker) {
+        AnimatedAlertDialog(
+            onDismissRequest = { showTemplatePicker = false },
+            title = { Text("🎴 选择卡片模板") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        Triple(1, "暖米 · 治愈系（默认）", 0xFFD4A373),
+                        Triple(2, "深夜 · 暗色限定", 0xFFE0B589),
+                        Triple(3, "樱粉 · 春日限定", 0xFFD98BA4)
+                    ).forEach { (tpl, label, accent) ->
+                        Surface(
+                            onClick = {
+                                showTemplatePicker = false
+                                generateCard(tpl)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(14.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(androidx.compose.ui.graphics.Color(accent))
+                                )
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showTemplatePicker = false }) { Text("取消") } }
         )
     }
 

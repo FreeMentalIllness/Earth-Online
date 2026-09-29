@@ -15,6 +15,7 @@ import com.example.earthonline.ui.report.ReportKind
 import com.example.earthonline.ui.achievements.AchievementViewModel
 import com.example.earthonline.ui.achievements.AchievementsRoute
 import com.example.earthonline.ui.ai.AiRoute
+import com.example.earthonline.ui.album.AlbumRoute
 import com.example.earthonline.ui.backpack.BackpackRoute
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.data.DataRoute
@@ -117,6 +118,8 @@ fun AppNavHost(
                 moreActions = moreActions
             )
         }
+        // v1.0.3：记忆相册（数据看板「记忆相册」入口进入）
+        composable(Screen.Album.route) { AlbumRoute(moreActions = moreActions) }
         composable(Screen.Ai.route) { AiRoute(moreActions = moreActions) }
         composable(Screen.Settings.route) { SettingsRoute(moreActions = moreActions) }
         // v1.2.3：集中设置页拆出的二级页（独立路由，返回栈由 NavHost 维护）

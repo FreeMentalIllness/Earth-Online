@@ -57,6 +57,8 @@ class ItemRepository @Inject constructor(private val dao: ItemDao) {
     fun categoryCount(): Flow<Int> = dao.categoryCount()
     /** v1.2.1 全局搜索 */
     fun search(q: String): Flow<List<ItemEntity>> = dao.search(q)
+    /** v1.0.3 报告：区间内拾取物品数（日键闭区间） */
+    fun countBetweenDays(fromDay: String, toDay: String): Flow<Int> = dao.countBetweenDays(fromDay, toDay)
     suspend fun insert(i: ItemEntity) = dao.insert(i)
     suspend fun update(i: ItemEntity) = dao.update(i)
     suspend fun clearCategory(name: String) = dao.clearCategory(name)

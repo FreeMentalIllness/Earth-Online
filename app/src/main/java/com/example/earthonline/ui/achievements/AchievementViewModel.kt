@@ -117,7 +117,10 @@ class AchievementViewModel @Inject constructor(
                 locationRepo.observeAll(),
                 profileRepo.observe(),
                 // v1.2.0：彩蛋计数器（DataStore 的 int 流， belong 与其它流同源同节奏）
-                settings.eggBlankTitle
+                settings.eggBlankTitle,
+                // v1.0.3：新彩蛋数据源（历年今日查看次数 / 记忆相册照片数）
+                settings.eggThrowback,
+                settings.memoryPhotosJson
             )
             combine(flows) { arr ->
                 @Suppress("UNCHECKED_CAST")
@@ -129,6 +132,8 @@ class AchievementViewModel @Inject constructor(
                 @Suppress("UNCHECKED_CAST") val locations = arr[5] as List<LocationEntity>
                 @Suppress("UNCHECKED_CAST") val profile = arr[6] as ProfileEntity?
                 val blankTitleTries = arr[7] as? Int ?: 0
+                val throwbackSeen = arr[8] as? Int ?: 0
+                val photosJson = arr[9] as? String ?: ""
 
                 val life = lifeStatsOf(profile?.birthDate)
                 val stats = AchStats(
@@ -162,7 +167,10 @@ class AchievementViewModel @Inject constructor(
                         .values.maxOrNull() ?: 0,
                     recordStreak = longestStreak(memos.map { localDayOf(it.createdAt) ?: it.createdAt.take(10) }),
                     emojiOnlyMemos = memos.count { isEmojiOnlyText(it.text) },
-                    newYearBirth = if (profile?.birthDate?.endsWith("-01-01") == true) 1 else 0
+                    newYearBirth = if (profile?.birthDate?.endsWith("-01-01") == true) 1 else 0,
+                    // —— v1.0.3 新增彩蛋字段 ——
+                    throwbackSeen = throwbackSeen,
+                    memoryPhotos = parsePhotoCount(photosJson)
                 )
                 val sources = EventSources(
                     doneAtList = tasks.mapNotNull { it.doneAt }.sorted(),
@@ -182,6 +190,16 @@ class AchievementViewModel @Inject constructor(
                 structureDirty = changed
             }
         }
+    }
+
+    /** v1.0.3：从 DataStore 的记忆相册 JSON 里数照片（解析失败按 0，绝不崩） */
+    private fun parsePhotoCount(jsonText: String): Int {
+        if (jsonText.isBlank()) return 0
+        return runCatching {
+            val arr = kotlinx.serialization.json.Json.parseToJsonElement(jsonText)
+                as? kotlinx.serialization.json.JsonArray
+            arr?.size ?: 0
+        }.getOrDefault(0)
     }
 
     private fun AchievementEntity.toUi(s: AchStats): AchievementUi {

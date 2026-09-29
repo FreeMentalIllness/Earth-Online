@@ -27,6 +27,9 @@ sealed class Screen(val route: String, val label: String) {
     /** v1.0.2：全部动态列表页。从主页「最近动态」右上角「全部」进入，不是底部 Tab。 */
     object AllActivities : Screen("all_activities", "全部动态")
 
+    /** v1.0.3：记忆相册。从数据看板「记忆相册」入口进入，不是底部 Tab。 */
+    object Album : Screen("album", "记忆相册")
+
     /**
      * 「收藏」与「背包」复用同一个界面（背包页的收藏 Tab），但必须是**独立路由**：
      * 若用同一路由加查询参数（backpack?tab=1），两者会共享 destination id 与 SavedState，

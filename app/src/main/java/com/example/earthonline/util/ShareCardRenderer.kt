@@ -45,7 +45,16 @@ data class ShareCardData(
     val achievements: Int,
     val totalAchievements: Int,
     val tasksDone: Int,
-    val signature: String
+    val signature: String,
+    // ————— v1.0.3 扩展 —————
+    /** 称号（自定义优先，默认「旅行者」） */
+    val title: String = "",
+    /** 当前连续记录天数（0 = 隐藏该栏） */
+    val streakDays: Int = 0,
+    /** 本月关键词（如「本月 42 次记录」，空 = 隐藏该栏） */
+    val monthKeyword: String = "",
+    /** 模板：1=暖米(默认) 2=深夜 3=樱粉 */
+    val template: Int = 1
 )
 
 object ShareCardRenderer {
@@ -53,27 +62,49 @@ object ShareCardRenderer {
     private const val W = 1080
     private const val H = 1440
 
-    private val BG_TOP = Color.parseColor("#FDF8F0")
-    private val BG_BOTTOM = Color.parseColor("#F3EADC")
-    private val AMBER = Color.parseColor("#D4A373")
-    private val AMBER_SOFT = Color.parseColor("#F0E2D2")
-    private val INK = Color.parseColor("#1E1A16")
-    private val INK_2 = Color.parseColor("#7A7268")
+    /** v1.0.3 三套模板配色：暖米（治愈系）/ 深夜 / 樱粉 */
+    private class Palette(
+        val bgTop: Int, val bgBottom: Int, val card: Int,
+        val accent: Int, val accentSoft: Int, val ink: Int, val ink2: Int
+    )
+
+    private val P_WARM = Palette(
+        Color.parseColor("#FDF8F0"), Color.parseColor("#F3EADC"), Color.WHITE,
+        Color.parseColor("#D4A373"), Color.parseColor("#F0E2D2"),
+        Color.parseColor("#1E1A16"), Color.parseColor("#7A7268")
+    )
+    private val P_NIGHT = Palette(
+        Color.parseColor("#1C1B22"), Color.parseColor("#26242E"), Color.parseColor("#2E2C38"),
+        Color.parseColor("#E0B589"), Color.parseColor("#3A3746"),
+        Color.parseColor("#F2EFE9"), Color.parseColor("#A8A1B3")
+    )
+    private val P_SAKURA = Palette(
+        Color.parseColor("#FDF1F4"), Color.parseColor("#F7DFE6"), Color.WHITE,
+        Color.parseColor("#D98BA4"), Color.parseColor("#F4D8E0"),
+        Color.parseColor("#3A2B30"), Color.parseColor("#9A8189")
+    )
+
+    private fun paletteOf(template: Int): Palette = when (template) {
+        2 -> P_NIGHT
+        3 -> P_SAKURA
+        else -> P_WARM
+    }
 
     /** 生成卡片位图。调用方负责 recycle（生成后立刻写文件，写完即可回收）。 */
     fun render(data: ShareCardData, avatarFile: File? = null): Bitmap {
+        val P = paletteOf(data.template)
         val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
 
-        // 背景：暖米色竖向渐变（比纯色多一点层次，又不会喧宾夺主）
+        // 背景：竖向渐变
         c.drawRect(
             0f, 0f, W.toFloat(), H.toFloat(),
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(0f, 0f, 0f, H.toFloat(), BG_TOP, BG_BOTTOM, Shader.TileMode.CLAMP)
+                shader = LinearGradient(0f, 0f, 0f, H.toFloat(), P.bgTop, P.bgBottom, Shader.TileMode.CLAMP)
             }
         )
         // 两个柔光装饰圆（低透明度，只做氛围）
-        val deco = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = AMBER; alpha = 36 }
+        val deco = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = P.accent; alpha = 36 }
         c.drawCircle(W - 100f, 150f, 240f, deco)
         c.drawCircle(80f, H - 160f, 280f, deco)
 
@@ -83,57 +114,74 @@ object ShareCardRenderer {
         c.drawRoundRect(
             RectF(72f, cardTop, (W - 72).toFloat(), cardBottom.toFloat()),
             44f, 44f,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = P.card }
         )
 
         // 顶部品牌行
-        val brand = textPaint(28f, INK_2)
+        val brand = textPaint(28f, P.ink2)
         drawCenter(c, "地 球 O n l i n e", W / 2f, cardTop + 78f, brand)
 
-        // 头像（圆形 + 琥珀描边）
-        val avatarSize = 260f
+        // 头像（圆形 + 描边）
+        val avatarSize = 240f
         val cx = W / 2f
-        val avatarTop = cardTop + 130f
-        drawAvatar(c, avatarFile, cx, avatarTop, avatarSize)
+        val avatarTop = cardTop + 124f
+        drawAvatar(c, avatarFile, cx, avatarTop, avatarSize, P)
 
-        // 名字
-        val namePaint = textPaint(54f, INK, bold = true)
-        drawCenter(c, data.name.ifBlank { "地球玩家" }, cx, avatarTop + avatarSize + 96f, namePaint)
+        // 名字 + 称号
+        val namePaint = textPaint(52f, P.ink, bold = true)
+        drawCenter(c, data.name.ifBlank { "地球玩家" }, cx, avatarTop + avatarSize + 92f, namePaint)
+        if (data.title.isNotBlank()) {
+            drawCenter(
+                c, "「${data.title}」", cx, avatarTop + avatarSize + 138f,
+                textPaint(30f, P.accent)
+            )
+        }
 
         // 等级
-        val levelPaint = textPaint(72f, AMBER, bold = true)
-        drawCenter(c, "Lv.${data.level}", cx, avatarTop + avatarSize + 208f, levelPaint)
+        val levelPaint = textPaint(66f, P.accent, bold = true)
+        drawCenter(c, "Lv.${data.level}", cx, avatarTop + avatarSize + 214f, levelPaint)
 
         // 经验条（距下一级进度）
-        val barTop = avatarTop + avatarSize + 250f
+        val barTop = avatarTop + avatarSize + 248f
         val barLeft = 190f
         val barRight = (W - 190).toFloat()
         val barH = 18f
         c.drawRoundRect(
             RectF(barLeft, barTop, barRight, barTop + barH),
             barH / 2f, barH / 2f,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = AMBER_SOFT }
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = P.accentSoft }
         )
         val p = data.levelProgress.coerceIn(0f, 1f)
         if (p > 0f) {
             c.drawRoundRect(
                 RectF(barLeft, barTop, barLeft + (barRight - barLeft) * p, barTop + barH),
                 barH / 2f, barH / 2f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = AMBER }
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = P.accent }
             )
         }
 
-        // 两个数据块：成就 / 完成任务
-        val statTop = barTop + 92f
-        drawStat(c, "🏆 成就", "${data.achievements}/${data.totalAchievements}", W / 2f - 200f, statTop)
-        drawStat(c, "✅ 完成任务", "${data.tasksDone}", W / 2f + 200f, statTop)
+        // 四个数据块：成就 / 完成任务 / 连续记录 / 本月关键词
+        val statTop = barTop + 86f
+        val gap = W / 4f
+        drawStat(c, "🏆 成就", "${data.achievements}/${data.totalAchievements}", gap * 0.5f, statTop, P)
+        drawStat(c, "✅ 任务", "${data.tasksDone}", gap * 1.5f, statTop, P)
+        if (data.streakDays > 0) {
+            drawStat(c, "🔥 连续", "${data.streakDays} 天", gap * 2.5f, statTop, P)
+        } else {
+            drawStat(c, "🔥 连续", "—", gap * 2.5f, statTop, P)
+        }
+        if (data.monthKeyword.isNotBlank()) {
+            drawStat(c, "📅 本月", data.monthKeyword.take(6), gap * 3.5f, statTop, P)
+        } else {
+            drawStat(c, "📅 本月", "—", gap * 3.5f, statTop, P)
+        }
 
         // 签名（多行居中，超长自动换行，最多 3 行）
         val sigTop = statTop + 150f
         val sig = data.signature.trim()
         if (sig.isNotBlank()) {
             val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = INK_2
+                color = P.ink2
                 textSize = 32f
             }
             val layout = StaticLayout.Builder
@@ -149,7 +197,7 @@ object ShareCardRenderer {
         }
 
         // 底部签名行
-        val footer = textPaint(26f, INK_2)
+        val footer = textPaint(26f, P.ink2)
         drawCenter(c, "把人生当成一场开放世界游戏", cx, cardBottom - 70f, footer)
         drawCenter(c, todayStr(), cx, cardBottom - 34f, footer)
 
@@ -157,13 +205,13 @@ object ShareCardRenderer {
     }
 
     /**
-     * @param file 头像**原图文件**（4K 也原样存着）。这里只需 260px 的圆，
+     * @param file 头像**原图文件**（4K 也原样存着）。这里只需小尺寸的圆，
      *             所以按目标尺寸降采样解码 —— 原图虽大，进内存的只有需要的那点像素。
      */
-    private fun drawAvatar(c: Canvas, file: File?, cx: Float, top: Float, size: Float) {
+    private fun drawAvatar(c: Canvas, file: File?, cx: Float, top: Float, size: Float, P: Palette) {
         val r = size / 2f
-        // 外圈：淡琥珀底（头像透明或加载失败时也不至于是个洞）
-        c.drawCircle(cx, top + r, r + 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = AMBER_SOFT })
+        // 外圈：淡底（头像透明或加载失败时也不至于是个洞）
+        c.drawCircle(cx, top + r, r + 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = P.accentSoft })
         val avatar = file?.let { ImageDownsampler.decodeSampledFile(it, size.toInt()) }
         if (avatar != null) {
             /* 居中裁剪：原图可能是任意长宽比（手机照片普遍 4:3），
@@ -185,23 +233,23 @@ object ShareCardRenderer {
             avatar.recycle()
         } else {
             // 没有上传头像时画默认地球 emoji
-            val p = textPaint(120f, AMBER)
-            drawCenter(c, "🌍", cx, top + r + 42f, p)
+            val p = textPaint(110f, P.accent)
+            drawCenter(c, "🌍", cx, top + r + 40f, p)
         }
         // 描边
         c.drawCircle(
             cx, top + r, r,
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = AMBER
+                color = P.accent
                 style = Paint.Style.STROKE
                 strokeWidth = 4f
             }
         )
     }
 
-    private fun drawStat(c: Canvas, label: String, value: String, cx: Float, top: Float) {
-        drawCenter(c, label, cx, top, textPaint(28f, INK_2))
-        drawCenter(c, value, cx, top + 52f, textPaint(46f, INK, bold = true))
+    private fun drawStat(c: Canvas, label: String, value: String, cx: Float, top: Float, P: Palette) {
+        drawCenter(c, label, cx, top, textPaint(26f, P.ink2))
+        drawCenter(c, value, cx, top + 50f, textPaint(38f, P.ink, bold = true))
     }
 
     private fun textPaint(size: Float, color: Int, bold: Boolean = false): Paint =

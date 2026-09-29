@@ -134,6 +134,13 @@ class TaskViewModel @Inject constructor(
         repo.update(t.copy(parentId = parentId, lastModified = todayStr()))
     }
 
+    /** v1.0.3：长按拖拽排序 —— 交换两个同级兄弟的排序号（UI 层保证同级才调用） */
+    fun swapOrder(a: TaskEntity, b: TaskEntity) = viewModelScope.launch {
+        if (a.id == b.id || a.parentId != b.parentId) return@launch
+        repo.update(a.copy(order = b.order))
+        repo.update(b.copy(order = a.order))
+    }
+
     /** 级联删除（含子任务），对应 HTML deleteTaskCascade */
     fun deleteCascade(id: String) = viewModelScope.launch { repo.deleteCascade(id) }
 }

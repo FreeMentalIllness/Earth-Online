@@ -20,6 +20,8 @@ import com.example.earthonline.data.repository.MemoRepository
 import com.example.earthonline.data.repository.ProfileRepository
 import com.example.earthonline.data.repository.TaskRepository
 import com.example.earthonline.data.local.datastore.SettingsDataStore
+import com.example.earthonline.util.Greeting
+import com.example.earthonline.util.GrowthStreak
 import com.example.earthonline.util.LifeStats
 import com.example.earthonline.util.lifeStatsOf
 import com.example.earthonline.util.localDayOf
@@ -121,7 +123,26 @@ data class HomeUiState(
     /** 最近动态显示类型筛选（供 UI 回显 FilterChip 选中态） */
     val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
     /** 最近动态首页显示条数（0 = 不限制） */
-    val feedLimit: Int = 3
+    val feedLimit: Int = 3,
+    // ————— v1.0.3 情绪价值与成长 —————
+    /** 动态问候语（时间段 + 最近心情 + 连续天数） */
+    val greeting: String = "",
+    /** 当前连续记录天数（今天未记录不断档，宽限到昨天） */
+    val streakDays: Int = 0,
+    /** 生长阶段 0-4（萌芽/抽枝/繁茂/参天） */
+    val streakStage: Int = 0,
+    /** 断更 ≥2 天时的回归鼓励语（不惩罚） */
+    val comeback: String? = null,
+    /** 「历年今日」回忆卡（去年今天留下的日志 / 完成任务 / 足迹） */
+    val throwback: List<ThrowbackItem> = emptyList(),
+    /** 「今日一签」：每天从过去的记录里确定性抽出一条（同一天刷新结果不变） */
+    val dailyDraw: ThrowbackItem? = null,
+    /** 用户自定义称号（空 = 默认「旅行者」） */
+    val customTitle: String = "",
+    /** 主页佩戴的徽章（最多 3 枚，来自已解锁成就） */
+    val badges: List<BadgeItem> = emptyList(),
+    /** 全部已解锁成就（供「佩戴徽章」管理对话框选择） */
+    val badgePool: List<BadgeItem> = emptyList()
 ) {
     val doneRatio: Int get() = if (totalTasks > 0) Math.round(doneTasks * 100f / totalTasks) else 0
     /** v1.2.0：成就进度（概览卡第三行，四卡统一三行文案用） */
@@ -133,6 +154,22 @@ data class HomeUiState(
     val latestMemo: String
         get() = recentMemos.firstOrNull()?.text?.take(20)?.ifBlank { "暂无记录" } ?: "暂无记录"
 }
+
+/**
+ * v1.0.3：回忆类条目（历年今日 / 今日一签共用）。
+ */
+data class ThrowbackItem(
+    val day: String,
+    val kind: String,   // memo / task / ach / loc
+    val title: String
+)
+
+/** v1.0.3：主页佩戴徽章（来自已解锁成就） */
+data class BadgeItem(
+    val id: String,
+    val title: String,
+    val desc: String
+)
 
 private data class TaskStat(val total: Int, val done: Int)
 private data class MemoStat(val total: Int, val recent: List<MemoEntity>)
@@ -152,7 +189,19 @@ private data class Parts(
     val collectionCount: Int = 0,
     val customTimeline: List<TimelineItem> = emptyList(),
     val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
-    val feedLimit: Int = 3
+    val feedLimit: Int = 3,
+    /** v1.0.3：全量数据包（历年今日 / 今日一签 / 连续成长都要全量口径） */
+    val bundle: Bundle = Bundle(),
+    val customTitle: String = "",
+    val badgeIds: List<String> = emptyList()
+)
+
+/** v1.0.3：回忆与成长计算所需的四份全量数据（都在现有 observeAll 流上，无新查询） */
+private data class Bundle(
+    val memos: List<MemoEntity> = emptyList(),
+    val doneTasks: List<TaskEntity> = emptyList(),
+    val locations: List<LocationEntity> = emptyList(),
+    val achievements: List<AchievementEntity> = emptyList()
 )
 
 /**
@@ -208,6 +257,27 @@ class HomeViewModel @Inject constructor(
     /** 最近动态首页显示条数（0 = 不限制；旧版本无该键默认 3，与原 ACT_LIMIT 一致） */
     private val feedLimitFlow: Flow<Int> = settingsDs.homeFeedLimit
 
+    /** v1.0.3：自定义称号 */
+    private val customTitleFlow: Flow<String> = settingsDs.customTitle
+
+    /** v1.0.3：主页佩戴徽章 id 列表（JSON 数组，最多 3） */
+    private val badgeIdsFlow: Flow<List<String>> = settingsDs.homeBadgesJson.map { txt ->
+        if (txt.isBlank()) emptyList()
+        else runCatching {
+            json.decodeFromString(ListSerializer(String.serializer()), txt)
+        }.getOrDefault(emptyList())
+    }
+
+    /** v1.0.3：全量数据包（回忆 / 成长计算口径） */
+    private val bundleFlow: Flow<Bundle> = combine(
+        memoRepo.observeAll(),
+        taskRepo.observeAll(),
+        locationRepo.observeAll(),
+        achievementRepo.observeAll()
+    ) { memos, tasks, locs, achs ->
+        Bundle(memos, tasks.filter { it.status == "done" }, locs, achs.filter { it.unlocked })
+    }
+
     val state: StateFlow<HomeUiState> =
         combine(profileFlow, taskFlow, memoFlow, achFlow, itemFlow) { p, t, m, a, i ->
             Parts(p, t, m, a, i)
@@ -219,6 +289,9 @@ class HomeViewModel @Inject constructor(
             .combine(customFlow) { parts, custom -> parts.copy(customTimeline = custom) }
             .combine(feedFilterFlow) { parts, kinds -> parts.copy(feedKinds = kinds) }
             .combine(feedLimitFlow) { parts, limit -> parts.copy(feedLimit = limit) }
+            .combine(bundleFlow) { parts, bundle -> parts.copy(bundle = bundle) }
+            .combine(customTitleFlow) { parts, title -> parts.copy(customTitle = title) }
+            .combine(badgeIdsFlow) { parts, ids -> parts.copy(badgeIds = ids) }
             .map { it.toUi() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -374,6 +447,9 @@ class HomeViewModel @Inject constructor(
     private fun Parts.toUi(): HomeUiState {
         val fields = parseFields(profile?.customFieldsJson)
         val shown = fields.take(3)
+        // 连续成长：日键集合一次算好，当前连续与回归语共用
+        val recordDays = recordDayKeys(bundle)
+        val streakDays = GrowthStreak.currentStreak(recordDays)
         return HomeUiState(
             loaded = true,
             name = profile?.name.orEmpty(),
@@ -409,8 +485,111 @@ class HomeViewModel @Inject constructor(
                 .take(TIMELINE_SHOW),
             customTimeline = customTimeline,
             feedKinds = feedKinds,
-            feedLimit = feedLimit
+            feedLimit = feedLimit,
+            // ————— v1.0.3 情绪价值与成长 —————
+            greeting = Greeting.build(
+                Greeting.now(),
+                bundle.memos.firstOrNull { it.type == "mood" }?.text,
+                streakDays
+            ),
+            streakDays = streakDays,
+            streakStage = GrowthStreak.stage(streakDays),
+            comeback = GrowthStreak.comebackMessage(recordDays),
+            throwback = buildThrowback(bundle),
+            dailyDraw = buildDailyDraw(bundle),
+            customTitle = customTitle,
+            badges = badgeIds.takeNotNull(3) { id ->
+                bundle.achievements.firstOrNull { it.id == id }?.let {
+                    BadgeItem(it.id, it.title.ifBlank { "成就" }, it.desc)
+                }
+            },
+            badgePool = bundle.achievements.map {
+                BadgeItem(it.id, it.title.ifBlank { "成就" }, it.desc)
+            }
         )
+    }
+
+    /** 已解锁徽章按 id 取行，最多保留 [max] 枚（id 失效的自动丢弃） */
+    private inline fun <T> List<String>.takeNotNull(max: Int, transform: (String) -> T?): List<T> {
+        val out = ArrayList<T>(max)
+        for (id in this) {
+            if (out.size >= max) break
+            transform(id)?.let { out.add(it) }
+        }
+        return out
+    }
+
+    /** 记录日键集合：日志日 ∪ 完成任务日 ∪ 足迹日（任意一种记录都算「记录」） */
+    private fun recordDayKeys(b: Bundle): Set<String> = buildSet {
+        b.memos.forEach { localDayOf(it.createdAt)?.let(::add) }
+        b.doneTasks.forEach { it.doneAt?.let { iso -> localDayOf(iso)?.let(::add) } }
+        b.locations.forEach { add(it.date.take(10)) }
+    }
+
+    /** 历年今日：去年今天留下的日志 / 完成任务 / 足迹（最多 6 条） */
+    private fun buildThrowback(b: Bundle): List<ThrowbackItem> {
+        val lastYear = lastYearToday() ?: return emptyList()
+        val out = ArrayList<ThrowbackItem>(6)
+        b.memos.forEach { m ->
+            val d = localDayOf(m.createdAt) ?: return@forEach
+            if (d == lastYear && m.text.isNotBlank()) out += ThrowbackItem(d, "memo", m.text.trim())
+        }
+        b.doneTasks.forEach { t ->
+            val d = t.doneAt?.let { localDayOf(it) } ?: return@forEach
+            if (d == lastYear) out += ThrowbackItem(d, "task", t.title.ifBlank { "任务" })
+        }
+        b.locations.forEach { l ->
+            if (l.date.take(10) == lastYear) out += ThrowbackItem(l.date.take(10), "loc", l.name.ifBlank { "足迹" })
+        }
+        return out.take(6)
+    }
+
+    /** 「去年今天」的日键（YYYY-MM-DD）；解析失败返回 null */
+    private fun lastYearToday(): String? {
+        val today = todayStr()
+        val year = today.take(4).toIntOrNull() ?: return null
+        return (year - 1).toString() + today.drop(4)
+    }
+
+    /**
+     * 今日一签：从过去的日志与解锁成就里确定性抽出一条。
+     * 用「今天距 2000-01-01 的天数」当随机种子 —— 同一天任何人刷新结果都一致，
+     * 明天自动换一张，不引入任何随机数状态。
+     */
+    private fun buildDailyDraw(b: Bundle): ThrowbackItem? {
+        val pool = ArrayList<ThrowbackItem>(32)
+        b.memos.forEach { m ->
+            val d = localDayOf(m.createdAt) ?: return@forEach
+            if (m.text.isNotBlank()) pool += ThrowbackItem(d, "memo", m.text.trim())
+        }
+        b.achievements.forEach { a ->
+            val d = a.unlockedAt?.let { localDayOf(it) } ?: return@forEach
+            pool += ThrowbackItem(d, "ach", "解锁成就「${a.title.ifBlank { "成就" }}」")
+        }
+        if (pool.isEmpty()) return null
+        val seed = runCatching {
+            val t = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(todayStr())
+            ((t?.time ?: 0L) / (24 * 3600_000L)).toInt()
+        }.getOrDefault(0)
+        return pool[Math.floorMod(seed, pool.size)]
+    }
+
+    /* ————— v1.0.3：徽章佩戴 / 回忆彩蛋计数 ————— */
+
+    /** 佩戴/摘下徽章（最多 3 枚；[achId] 已佩戴则摘下） */
+    fun toggleBadge(achId: String) {
+        viewModelScope.launch {
+            val cur = badgeIdsFlow.first()
+            val next = if (achId in cur) cur - achId else (cur + achId).takeLast(3)
+            settingsDs.setHomeBadgesJson(
+                json.encodeToString(ListSerializer(String.serializer()), next)
+            )
+        }
+    }
+
+    /** 主页翻开「历年今日」卡时计数（彩蛋「时光回声」判定源） */
+    fun onThrowbackSeen() {
+        viewModelScope.launch { settingsDs.bumpEggThrowback() }
     }
 
     private fun parseFields(jsonText: String?): List<CustomField> {

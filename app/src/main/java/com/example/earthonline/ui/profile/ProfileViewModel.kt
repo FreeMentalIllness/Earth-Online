@@ -6,19 +6,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.earthonline.data.local.datastore.SettingsDataStore
 import com.example.earthonline.data.local.entity.ProfileEntity
 import com.example.earthonline.data.model.CustomField
 import com.example.earthonline.data.repository.AchievementRepository
+import com.example.earthonline.data.repository.LocationRepository
+import com.example.earthonline.data.repository.MemoRepository
 import com.example.earthonline.data.repository.ProfileRepository
 import com.example.earthonline.data.repository.TaskRepository
+import com.example.earthonline.util.GrowthStreak
 import com.example.earthonline.util.ImageStore
 import com.example.earthonline.util.ShareCardData
+import com.example.earthonline.util.XpRules
 import com.example.earthonline.util.lifeStatsOf
+import com.example.earthonline.util.localDayOf
+import com.example.earthonline.util.todayStr
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +46,10 @@ class ProfileViewModel @Inject constructor(
     // 由各自的仓储提供（Hilt 已注入，不用在 UI 层再开一个 VM）
     private val achRepo: AchievementRepository,
     private val taskRepo: TaskRepository,
+    // v1.0.3：分享卡片扩展（连续记录 / 本月关键词 / 称号）
+    private val memoRepo: MemoRepository,
+    private val locationRepo: LocationRepository,
+    private val settings: SettingsDataStore,
     // v1.0.0：头像改成「原图文件」后，VM 需要读写私有目录（旧字节迁移 / 分享卡片取图）
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
@@ -58,12 +70,21 @@ class ProfileViewModel @Inject constructor(
     // 当前库内行（用于 copy 保留未编辑字段）
     private var loaded: ProfileEntity? = null
 
+    init {
+        // 称号独立于 profile 表，存 DataStore；collect 保持编辑态与持久化同步
+        viewModelScope.launch {
+            settings.customTitle.collect { customTitle = it }
+        }
+    }
+
     var name by mutableStateOf("")
     var avatarKey by mutableStateOf("")
     var gender by mutableStateOf("")
     var country by mutableStateOf("中国")
     var province by mutableStateOf("")
     var signature by mutableStateOf("")
+    /** v1.0.3：自定义称号（空 = 默认「旅行者」），持久化在 DataStore */
+    var customTitle by mutableStateOf("")
     var birthDate by mutableStateOf("")
     var customFields by mutableStateOf(listOf<CustomField>())
     /**
@@ -107,13 +128,26 @@ class ProfileViewModel @Inject constructor(
     }
 
     /**
-     * v1.0.0：组装分享卡片数据。
+     * v1.0.3：组装分享卡片数据（改为 suspend —— 需要现算连续天数与本月记录数）。
      * 用**当前编辑态**的值（用户可能刚改完名字还没保存就点了分享），
      * 编辑态为空时回落到库内已保存的值。
      */
-    fun buildCardData(): ShareCardData {
+    suspend fun buildCardData(template: Int = 1): ShareCardData {
         val birth = birthDate.takeIf { it.isNotBlank() } ?: loaded?.birthDate.orEmpty()
         val life = lifeStatsOf(birth)
+
+        // 连续记录与本月记录数：日志 ∪ 完成任务 ∪ 足迹三种记录日合并计算
+        val recordDays = HashSet<String>()
+        memoRepo.observeAll().first().forEach { localDayOf(it.createdAt)?.let(recordDays::add) }
+        taskRepo.observeAll().first()
+            .filter { it.status == "done" }
+            .forEach { it.doneAt?.let { iso -> localDayOf(iso)?.let(recordDays::add) } }
+        locationRepo.observeAll().first().forEach { recordDays.add(it.date.take(10)) }
+        val streak = GrowthStreak.currentStreak(recordDays)
+        val monthPrefix = todayStr().take(7)
+        val monthCount = recordDays.count { it.startsWith(monthPrefix) }
+
+        val customTitle = settings.customTitle.first()
         return ShareCardData(
             name = name.takeIf { it.isNotBlank() } ?: loaded?.name.orEmpty(),
             level = life.age,
@@ -121,7 +155,11 @@ class ProfileViewModel @Inject constructor(
             achievements = unlockedAch.value,
             totalAchievements = totalAch.value,
             tasksDone = doneTasks.value,
-            signature = signature.takeIf { it.isNotBlank() } ?: loaded?.signature.orEmpty()
+            signature = signature.takeIf { it.isNotBlank() } ?: loaded?.signature.orEmpty(),
+            title = XpRules.titleFor(customTitle),
+            streakDays = streak,
+            monthKeyword = if (monthCount > 0) "$monthCount 次记录" else "",
+            template = template
         )
     }
 
@@ -196,6 +234,8 @@ class ProfileViewModel @Inject constructor(
                     customFieldsJson = Json.encodeToString(ListSerializer(CustomField.serializer()), customFields)
                 )
             )
+            // v1.0.3：称号随保存一起落盘（DataStore）
+            settings.setCustomTitle(customTitle)
         }
     }
 }

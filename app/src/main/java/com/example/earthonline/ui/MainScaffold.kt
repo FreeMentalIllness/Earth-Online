@@ -110,6 +110,22 @@ fun MainScaffold(
     val wallpaper by settingsVm.wallpaper.collectAsStateWithLifecycle(initialValue = "")
     val wallpaperAlpha by settingsVm.wallpaperAlpha.collectAsStateWithLifecycle(initialValue = 0.35f)
     val achSound by settingsVm.achSound.collectAsStateWithLifecycle(initialValue = true)
+    // v1.0.3：壁纸轮换 —— 从记忆相册里按日期确定性挑一张（每天换一张，省电不刷新）
+    val wallpaperRotate by settingsVm.wallpaperRotate.collectAsStateWithLifecycle(initialValue = false)
+    val memoryPhotosJson by settingsVm.memoryPhotosJson.collectAsStateWithLifecycle(initialValue = "")
+    val quickNotif by settingsVm.quickNotif.collectAsStateWithLifecycle(initialValue = false)
+
+    val effectiveWallpaper = remember(wallpaper, wallpaperRotate, memoryPhotosJson) {
+        if (wallpaperRotate && memoryPhotosJson.contains("\"path\"")) {
+            // 轻量提取 path 字段（避免在组合里做完整 JSON 解码）
+            val paths = Regex("\"path\"\\s*:\\s*\"([^\"]+)\"")
+                .findAll(memoryPhotosJson).map { it.groupValues[1] }.toList()
+            if (paths.isNotEmpty()) {
+                val dayOfYear = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+                paths[dayOfYear % paths.size]
+            } else wallpaper
+        } else wallpaper
+    }
 
     // 音效开关变化时同步给播放器（关闭时顺带释放 SoundPool，省一份常驻内存）
     LaunchedEffect(achSound) { AchievementSound.setEnabled(achSound) }
@@ -119,18 +135,23 @@ fun MainScaffold(
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
 
+    // 通知栏常驻快捷记录：跟随开关（无通知权限时静默不显示）
+    LaunchedEffect(quickNotif) {
+        com.example.earthonline.util.QuickAddNotification.update(context, quickNotif)
+    }
+
     /* 性能：壁纸按屏幕尺寸解码。原实现直接用 File 作为 model，Coil 拿不到尺寸约束时
        会按原图解码（现在手机动辄 12MP，一张壁纸 ≈ 48MB 位图），既是内存尖峰也是掉帧源。 */
     val screenW = configuration.screenWidthDp
     val screenH = configuration.screenHeightDp
-    val wallpaperRequest = remember(wallpaper, screenW, screenH) {
-        if (wallpaper.isBlank()) {
+    val wallpaperRequest = remember(effectiveWallpaper, screenW, screenH) {
+        if (effectiveWallpaper.isBlank()) {
             null
         } else {
             val w = with(density) { screenW.dp.roundToPx() }
             val h = with(density) { screenH.dp.roundToPx() }
             ImageRequest.Builder(context)
-                .data(File(wallpaper))
+                .data(File(effectiveWallpaper))
                 .size(w, h)
                 .precision(Precision.INEXACT)
                 .crossfade(false)

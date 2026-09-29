@@ -2,9 +2,12 @@ package com.example.earthonline.ui.tasks
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -19,7 +22,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -34,7 +47,9 @@ import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
 import com.example.earthonline.ui.components.UiDimens
 import com.example.earthonline.ui.theme.AmberPrimary
+import com.example.earthonline.util.AchievementSound
 import com.example.earthonline.util.millisToDayStr
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -101,6 +116,32 @@ fun TasksScreen(
     }
 
     val doneCount = remember(flat) { flat.count { it.task.status == "done" } }
+
+    // ————— v1.0.3 庆祝三件套：勾选完成时轻震动 + 琥珀光晕 + 清脆音效，连击时光效渐强 —————
+    val haptic = LocalHapticFeedback.current
+    val ctx = LocalContext.current
+    var celebrateId by remember { mutableStateOf<String?>(null) }
+    var combo by remember { mutableStateOf(0) }
+
+    fun celebrate(taskId: String) {
+        combo += 1
+        celebrateId = taskId
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        // 复用成就音效播放器（SoundPool 低延迟，且跟随设置里的音效开关）
+        AchievementSound.play(ctx)
+    }
+    // 连击窗口：4 秒内继续勾选则光效渐强，超时清零（不做惩罚性设计）
+    LaunchedEffect(combo) {
+        if (combo > 0) { delay(4_000); combo = 0 }
+    }
+    LaunchedEffect(celebrateId) {
+        if (celebrateId != null) { delay(700); celebrateId = null }
+    }
+
+    // ————— v1.0.3 长按拖拽排序：仅允许在同级兄弟间交换（不破坏任务树结构） —————
+    val listState = rememberLazyListState()
+    var dragIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -186,27 +227,86 @@ fun TasksScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = UiDimens.ListPad),
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = UiDimens.ListPad)
+                        .pointerInput(visible) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { off ->
+                                    val info = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+                                        off.y >= it.offset && off.y <= it.offset + it.size
+                                    }
+                                    dragIndex = info?.index
+                                    dragOffset = 0f
+                                },
+                                onDrag = { change, amount ->
+                                    val i = dragIndex ?: return@detectDragGesturesAfterLongPress
+                                    change.consume()
+                                    dragOffset += amount.y
+                                    val info = listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.index == i } ?: return@detectDragGesturesAfterLongPress
+                                    val cur = visible.getOrNull(i) ?: return@detectDragGesturesAfterLongPress
+                                    val half = info.size / 2f
+                                    if (dragOffset > half) {
+                                        // 向下找最近的同级兄弟
+                                        for (j in i + 1 until visible.size) {
+                                            if (visible[j].task.parentId != cur.task.parentId) break
+                                            vm.swapOrder(cur.task, visible[j].task)
+                                            dragIndex = j
+                                            dragOffset -= info.size
+                                            break
+                                        }
+                                    } else if (dragOffset < -half) {
+                                        for (j in i - 1 downTo 0) {
+                                            if (visible[j].task.parentId != cur.task.parentId) break
+                                            vm.swapOrder(cur.task, visible[j].task)
+                                            dragIndex = j
+                                            dragOffset += info.size
+                                            break
+                                        }
+                                    }
+                                },
+                                onDragEnd = { dragIndex = null; dragOffset = 0f },
+                                onDragCancel = { dragIndex = null; dragOffset = 0f }
+                            )
+                        },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    items(
+                    itemsIndexed(
                         visible,
-                        key = { it.task.id },
+                        key = { _, node -> node.task.id },
                         // contentType 告诉 Compose「这些格子长得一样」，滚动时可以直接复用
                         // 上一个同类格子的测量结果与组合结果，省掉一次重新组合
-                        contentType = { "taskRow" }
-                    ) { node ->
-                        Box(Modifier.animateItem()) {
+                        contentType = { _, _ -> "taskRow" }
+                    ) { index, node ->
+                        val dragging = dragIndex == index
+                        Box(
+                            Modifier
+                                .animateItem()
+                                .graphicsLayer {
+                                    if (dragging) {
+                                        translationY = dragOffset
+                                        scaleX = 1.02f
+                                        scaleY = 1.02f
+                                    }
+                                }
+                        ) {
                         TaskRow(
                             node = node,
                             collapsed = collapsed.value.contains(node.task.id),
+                            celebrate = celebrateId == node.task.id,
+                            combo = combo,
                             onToggleCollapse = {
                                 val id = node.task.id
                                 collapsed.value = if (collapsed.value.contains(id))
                                     collapsed.value - id else collapsed.value + id
                             },
-                            onToggleDone = { vm.toggleDone(node.task) },
+                            onToggleDone = {
+                                if (node.task.status != "done") celebrate(node.task.id)
+                                vm.toggleDone(node.task)
+                            },
                             onSetProgress = { vm.setProgress(node.task, it) },
                             onEdit = { editing = node.task },
                             onAddChild = { addParentId = node.task.id; showAdd = true },
@@ -300,6 +400,8 @@ private fun TreeGuide(depth: Int, ancestorLast: List<Boolean>, isLast: Boolean) 
 private fun TaskRow(
     node: TaskNode,
     collapsed: Boolean,
+    celebrate: Boolean,
+    combo: Int,
     onToggleCollapse: () -> Unit,
     onToggleDone: () -> Unit,
     onSetProgress: (Int) -> Unit,
@@ -311,10 +413,36 @@ private fun TaskRow(
     val hasChildren = node.children.isNotEmpty()
     val done = t.status == "done"
 
+    // v1.0.3：完成庆祝的琥珀光晕（连击时光晕强度递增，封顶避免过曝）
+    val glow = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(celebrate) {
+        if (celebrate) {
+            glow.snapTo((0.55f + combo * 0.12f).coerceAtMost(0.95f))
+            glow.animateTo(0f, androidx.compose.animation.core.tween(650))
+        }
+    }
+
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         TreeGuide(depth = node.depth, ancestorLast = node.ancestorLast, isLast = node.isLast)
         Card(
-            modifier = Modifier.weight(1f).clickable { onEdit() },
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onEdit() }
+                .drawWithContent {
+                    drawContent()
+                    if (glow.value > 0f) {
+                        // 外圈扩散描边 + 内侧淡填充，构成一次「完成」的光效反馈
+                        drawRoundRect(
+                            color = AmberPrimary.copy(alpha = glow.value),
+                            cornerRadius = CornerRadius(40f, 40f),
+                            style = Stroke(width = 8f + 40f * glow.value)
+                        )
+                        drawRoundRect(
+                            color = AmberPrimary.copy(alpha = glow.value * 0.25f),
+                            cornerRadius = CornerRadius(40f, 40f)
+                        )
+                    }
+                },
             shape = RoundedCornerShape(UiDimens.ItemRadius),
             colors = CardDefaults.cardColors(
                 // 父任务用更高的容器色，与子任务拉开层次

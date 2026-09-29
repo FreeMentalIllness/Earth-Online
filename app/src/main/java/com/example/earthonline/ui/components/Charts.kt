@@ -5,6 +5,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -12,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,9 +28,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -100,7 +106,9 @@ fun BarChart(
     /** 0 数据时的引导文案（补充说明，可选） */
     emptyHint: String? = null,
     /** 0 数据时的骨架柱数量 */
-    skeletonCount: Int = 12
+    skeletonCount: Int = 12,
+    /** v1.0.3：点击某根柱子（下标），带按压缩放反馈；null = 不可点 */
+    onBarClick: ((Int) -> Unit)? = null
 ) {
     if (items.isEmpty()) {
         EmptyBarSkeleton(maxHeight = maxHeight, bars = skeletonCount, label = emptyLabel, hint = emptyHint)
@@ -132,10 +140,40 @@ fun BarChart(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                items.forEach { bar ->
+                items.forEachIndexed { index, bar ->
                     val barHeight = maxHeight * (bar.value.toFloat() / max)
+                    // v1.0.3：可点击柱子的按压缩放（弹性反馈）
+                    val pressed = remember { androidx.compose.runtime.mutableStateOf(false) }
+                    val scale by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (pressed.value) 0.82f else 1f,
+                        animationSpec = androidx.compose.animation.core.spring(
+                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                        ),
+                        label = "barScale"
+                    )
                     Column(
-                        Modifier.weight(1f).fillMaxHeight(),
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .then(
+                                if (onBarClick != null) {
+                                    Modifier.pointerInput(index) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                pressed.value = true
+                                                try { awaitRelease() } finally { pressed.value = false }
+                                            },
+                                            onTap = { onBarClick(index) }
+                                        )
+                                    }
+                                } else Modifier
+                            )
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                            },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Bottom
                     ) {

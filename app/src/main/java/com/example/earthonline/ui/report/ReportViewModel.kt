@@ -2,10 +2,12 @@ package com.example.earthonline.ui.report
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.earthonline.data.local.datastore.SettingsDataStore
 import com.example.earthonline.data.local.entity.AchievementEntity
 import com.example.earthonline.data.local.entity.MemoEntity
 import com.example.earthonline.data.local.entity.TaskEntity
 import com.example.earthonline.data.repository.AchievementRepository
+import com.example.earthonline.data.repository.ItemRepository
 import com.example.earthonline.data.repository.LocationRepository
 import com.example.earthonline.data.repository.MemoRepository
 import com.example.earthonline.data.repository.TaskRepository
@@ -71,6 +73,9 @@ private data class Raw(
     val memos: Int = 0,
     val achievements: Int = 0,
     val locations: Int = 0,
+    // v1.0.3：新经验来源
+    val items: Int = 0,
+    val photos: Int = 0,
     val memoList: List<MemoEntity> = emptyList(),
     val doneList: List<TaskEntity> = emptyList(),
     val achList: List<AchievementEntity> = emptyList()
@@ -88,7 +93,11 @@ class ReportViewModel @Inject constructor(
     private val taskRepo: TaskRepository,
     private val memoRepo: MemoRepository,
     private val achRepo: AchievementRepository,
-    private val locationRepo: LocationRepository
+    private val locationRepo: LocationRepository,
+    // v1.0.3：经验来源多元化（物品 / 记忆照片）
+    private val itemRepo: ItemRepository,
+    private val settings: SettingsDataStore,
+    private val json: kotlinx.serialization.json.Json
 ) : ViewModel() {
 
     private val kindFlow = MutableStateFlow(ReportKind.DAY)
@@ -111,6 +120,14 @@ class ReportViewModel @Inject constructor(
                 .combine(achRepo.unlockedBetween(r.fromIso, r.toIso, DETAIL_LIMIT)) { raw, list ->
                     raw.copy(achList = list)
                 }
+                // v1.0.3：区间内拾取物品数（日键闭区间）
+                .combine(itemRepo.countBetweenDays(r.fromDay, r.toDay)) { raw, n ->
+                    raw.copy(items = n)
+                }
+                // v1.0.3：区间内导入的记忆照片数（按照片归属日统计）
+                .combine(settings.memoryPhotosJson) { raw, txt ->
+                    raw.copy(photos = countPhotosInRange(txt, r.fromDay, r.toDay))
+                }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Raw())
 
@@ -132,10 +149,10 @@ class ReportViewModel @Inject constructor(
     }
 
     private fun buildState(kind: ReportKind, raw: Raw): ReportUiState {
-        val xp = raw.tasksDone * XpRules.TASK_DONE +
-            raw.achievements * XpRules.ACHIEVEMENT +
-            raw.memos * XpRules.MEMO +
-            raw.locations * XpRules.LOCATION
+        // v1.0.3：统一走 XpRules.totalXp（任务/成就/日志/足迹/物品/照片 六类来源）
+        val xp = XpRules.totalXp(
+            raw.tasksDone, raw.achievements, raw.memos, raw.locations, raw.items, raw.photos
+        )
 
         // 一个「事件」= 一条灵感 / 一个完成任务 / 一个解锁成就 —— 图表统计的是"活跃事件数"，
         // 与上面四项计数口径不同（那四项是分类计数，这个是总量分布）。
@@ -172,7 +189,7 @@ class ReportViewModel @Inject constructor(
             locations = raw.locations,
             xp = xp,
             bars = bars,
-            summary = daySummary(raw, buckets),
+            summary = daySummary(raw, buckets, xp),
             highlights = highlightsOf(raw)
         )
     }
@@ -241,26 +258,31 @@ class ReportViewModel @Inject constructor(
     }
 
     /** 日报总结：挑一个峰值时段说人话，全空时给一句不打击人的话 */
-    private fun daySummary(raw: Raw, buckets: IntArray): String {
+    private fun daySummary(raw: Raw, buckets: IntArray, xp: Int): String {
         val total = buckets.sum()
         if (total == 0) return "今天还没有任何记录。写下第一条世界日志，就算开局了。"
         val peak = buckets.withIndex().maxByOrNull { it.value }
         val peakText = if (peak != null && peak.value > 0) "${peak.index}:00 前后最活跃" else "分布比较均匀"
+        // v1.0.3：智能总结更「有人味」—— 根据产出结构给一句针对性的话
+        val nudge = when {
+            raw.tasksDone > 0 && raw.memos == 0 -> "任务推进了不少，也给今天的自己留一句话吧。"
+            raw.tasksDone == 0 && raw.memos > 0 -> "今天更多是在记录与思考，也很好。"
+            else -> ""
+        }
         return "今天共 $total 次记录，$peakText。" +
             "完成 ${raw.tasksDone} 个任务、记下 ${raw.memos} 条灵感，" +
-            "解锁 ${raw.achievements} 个成就，获得 ${
-                raw.tasksDone * XpRules.TASK_DONE + raw.achievements * XpRules.ACHIEVEMENT +
-                    raw.memos * XpRules.MEMO + raw.locations * XpRules.LOCATION
-            } 点经验。"
+            "解锁 ${raw.achievements} 个成就，获得 $xp 点经验。$nudge"
     }
 
     private fun weekSummary(raw: Raw, buckets: IntArray): String {
         val total = buckets.sum()
         if (total == 0) return "这一周还是空的。明天先完成一个小任务试试。"
         val active = buckets.count { it > 0 }
+        // v1.0.3：不打击人的温和提示
+        val nudge = if (active < 4) "空着的几天也没关系，回来继续就好。" else ""
         return "近 7 天有 $active 天留下记录，合计 $total 次。" +
             "完成任务 ${raw.tasksDone} 个，新增灵感 ${raw.memos} 条，" +
-            "解锁成就 ${raw.achievements} 个，标记足迹 ${raw.locations} 处。"
+            "解锁成就 ${raw.achievements} 个，标记足迹 ${raw.locations} 处。$nudge"
     }
 
     private fun yearSummary(raw: Raw, buckets: IntArray): String {
@@ -277,6 +299,19 @@ class ReportViewModel @Inject constructor(
         // 只需要拿到毫秒用于按时/日/月分桶；解析不了的事件直接归到「无时间」，不计入图表
         if (iso.isNullOrBlank()) return -1L
         return runCatching { ISO_MS.parse(iso)?.time }.getOrNull() ?: -1L
+    }
+
+    /** v1.0.3：从记忆相册 JSON 统计落在 [fromDay, toDay] 区间内的照片数（解析失败返回 0） */
+    private fun countPhotosInRange(txt: String, fromDay: String, toDay: String): Int {
+        if (txt.isBlank()) return 0
+        return runCatching {
+            val arr = json.parseToJsonElement(txt) as? kotlinx.serialization.json.JsonArray ?: return 0
+            arr.count { el ->
+                val day = (el as? kotlinx.serialization.json.JsonObject)
+                    ?.get("day")?.toString()?.trim('"') ?: return@count false
+                day >= fromDay && day <= toDay
+            }
+        }.getOrDefault(0)
     }
 
     private fun hourOfTs(ts: Long): Int {
