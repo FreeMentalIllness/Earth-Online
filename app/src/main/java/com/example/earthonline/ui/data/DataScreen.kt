@@ -20,6 +20,7 @@ import com.example.earthonline.ui.components.SectionHeader
 import com.example.earthonline.ui.components.UiDimens
 import com.example.earthonline.ui.components.DonutChart
 import com.example.earthonline.ui.components.DonutSlice
+import com.example.earthonline.ui.components.EmptyState
 import com.example.earthonline.ui.navigation.Screen
 import com.example.earthonline.ui.theme.AmberPrimary
 import com.example.earthonline.ui.theme.TextSecondaryLight
@@ -106,19 +107,29 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         SectionHeader("任务完成度")
-                        val pct = if (total > 0) done * 100 / total else 0
-                        DonutChart(
-                            slices = listOf(
-                                DonutSlice("已完成", done, AmberPrimary),
-                                DonutSlice("进行中", (total - done).coerceAtLeast(0), TextSecondaryLight.copy(alpha = 0.25f))
-                            ),
-                            centerText = "$pct%"
-                        )
-                        Text(
-                            "已完成 $done / $total",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (total == 0) {
+                            // v1.2.3：无数据时不再画一个空荡荡的圆环，改为引导 + 跳转
+                            EmptyState(
+                                emoji = "📊",
+                                title = "还没有任务",
+                                message = "添加并完成任务后，这里会显示完成度圆环。",
+                                actionLabel = "去添加任务"
+                            ) { moreActions.onNavigate(Screen.Tasks.route) }
+                        } else {
+                            val pct = done * 100 / total
+                            DonutChart(
+                                slices = listOf(
+                                    DonutSlice("已完成", done, AmberPrimary),
+                                    DonutSlice("进行中", (total - done).coerceAtLeast(0), TextSecondaryLight.copy(alpha = 0.25f))
+                                ),
+                                centerText = "$pct%"
+                            )
+                            Text(
+                                "已完成 $done / $total",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -126,7 +137,12 @@ fun DataScreen(vm: StatsViewModel, moreActions: MoreMenuActions) {
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.CardRadius)) {
                     Column(Modifier.fillMaxWidth().padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionHeader("近 14 天活跃度")
-                        BarChart(items = byDay.map { BarItem(it.day.takeLast(2), it.count) })
+                        val avgActive = if (byDay.isNotEmpty()) byDay.sumOf { it.count } / byDay.size else 0
+                        BarChart(
+                            items = byDay.map { BarItem(it.day.takeLast(2), it.count) },
+                            averageValue = avgActive,
+                            averageLabel = if (avgActive > 0) "历史均值 $avgActive" else null
+                        )
                     }
                 }
             }

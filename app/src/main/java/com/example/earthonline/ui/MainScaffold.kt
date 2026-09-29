@@ -8,6 +8,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,11 +19,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.example.earthonline.ui.theme.AmberPrimary
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.res.painterResource
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -41,6 +44,7 @@ import com.example.earthonline.ui.home.AccountingDownloadDialog
 import com.example.earthonline.ui.navigation.AppNavHost
 import com.example.earthonline.ui.navigation.Screen
 import com.example.earthonline.ui.navigation.bottomNavItems
+import com.example.earthonline.ui.navigation.settingsSubRoutes
 import com.example.earthonline.ui.settings.SettingsViewModel
 import com.example.earthonline.util.AchievementSound
 import android.app.Activity
@@ -138,15 +142,19 @@ fun MainScaffold(
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler(enabled = true) {
         val home = Screen.Home.route
-        if (currentRoute != null && currentRoute != home) {
-            navigateToTab(navController, home)
-        } else {
-            val now = System.currentTimeMillis()
-            if (now - lastBackPress < 2000) {
-                (context as? Activity)?.finish()
-            } else {
-                lastBackPress = now
-                Toast.makeText(context, "再按一次退出", Toast.LENGTH_SHORT).show()
+        when {
+            // v1.2.3：设置二级页（外观/通用/数据与备份/关于）按返回应弹回「设置」主页，
+            // 而非直接跳回首页 —— 返回栈由 NavHost 维护，这里只负责触发一次 pop。
+            currentRoute in settingsSubRoutes -> navController.popBackStack()
+            currentRoute != null && currentRoute != home -> navigateToTab(navController, home)
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPress < 2000) {
+                    (context as? Activity)?.finish()
+                } else {
+                    lastBackPress = now
+                    Toast.makeText(context, "再按一次退出", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -163,7 +171,16 @@ fun MainScaffold(
                         selected = selected,
                         onClick = { navigateToTab(navController, item.route) },
                         icon = { Icon(painterResource(item.iconRes), contentDescription = item.label) },
-                        label = { Text(item.label) }
+                        label = { Text(item.label) },
+                        // v1.2.3：底部导航配色统一为「深棕灰未选 / 暖琥珀选中」，
+                        // 与全局视觉基线（木质暖调）一致，不再随主题色随机漂移。
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = AmberPrimary,
+                            unselectedIconColor = Color(0xFF6B5B4F),
+                            selectedTextColor = AmberPrimary,
+                            unselectedTextColor = Color(0xFF6B5B4F),
+                            indicatorColor = AmberPrimary.copy(alpha = 0.14f)
+                        )
                     )
                 }
             }

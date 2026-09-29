@@ -81,47 +81,72 @@ fun DonutChart(
 /**
  * 柱状图（纯 Compose 布局，不依赖第三方图表库）。
  * 每根柱子高度按 value/max 比例，柱顶显示数值，下方显示标签。
+ *
+ * v1.2.3：新增可选历史均值线（[averageValue] / [averageLabel]）。
+ * 在柱子**后面**画一条虚线，避免遮挡柱顶数值；颜色用暖棕，与琥珀柱形成对比。
+ * 当平均值为 0 或大于当前峰值时不画线（0 均值无意义，超峰值填不满也会误导）。
  */
 @Composable
 fun BarChart(
     items: List<BarItem>,
     modifier: Modifier = Modifier,
     maxHeight: androidx.compose.ui.unit.Dp = 140.dp,
-    color: Color = AmberPrimary
+    color: Color = AmberPrimary,
+    averageValue: Int? = null,
+    averageLabel: String? = null
 ) {
     if (items.isEmpty()) {
         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     val max = items.maxOf { it.value }.coerceAtLeast(1)
+    val avg = averageValue?.let { if (it > 0) it.coerceAtMost(max) else null }
+    val avgColor = Color(0xFF8A6D3B) // 暖棕，与琥珀柱对比
     Column(modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().height(maxHeight),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            items.forEach { bar ->
-                val barHeight = maxHeight * (bar.value.toFloat() / max)
-                Column(
-                    Modifier.weight(1f).fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    Text(
-                        if (bar.value > 0) bar.value.toString() else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(barHeight.coerceAtLeast(2.dp))
-                            .background(
-                                color,
-                                RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
-                            )
-                    )
+        Box(Modifier.fillMaxWidth().height(maxHeight)) {
+            // 均值线先画（在柱子之后声明的 Row 之上会被柱子盖住，符合预期）
+            if (avg != null) {
+                val frac = (avg.toFloat() / max).coerceIn(0f, 1f)
+                Canvas(Modifier.fillMaxSize()) {
+                    val y = size.height * (1f - frac)
+                    val dash = 6.dp.toPx()
+                    val gap = 4.dp.toPx()
+                    var x = 0f
+                    while (x < size.width) {
+                        val end = (x + dash).coerceAtMost(size.width)
+                        drawLine(avgColor, Offset(x, y), Offset(end, y), strokeWidth = 2.dp.toPx())
+                        x = end + gap
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().height(maxHeight),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                items.forEach { bar ->
+                    val barHeight = maxHeight * (bar.value.toFloat() / max)
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        Text(
+                            if (bar.value > 0) bar.value.toString() else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 2.dp)
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(barHeight.coerceAtLeast(2.dp))
+                                .background(
+                                    color,
+                                    RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
+                                )
+                        )
+                    }
                 }
             }
         }
@@ -134,6 +159,26 @@ fun BarChart(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
+            }
+        }
+        if (averageLabel != null && avg != null) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Canvas(Modifier.size(18.dp, 2.dp)) {
+                    val dash = 5.dp.toPx()
+                    val gap = 3.dp.toPx()
+                    var x = 0f
+                    while (x < size.width) {
+                        val end = (x + dash).coerceAtMost(size.width)
+                        drawLine(avgColor, Offset(x, size.height / 2), Offset(end, size.height / 2), strokeWidth = size.height)
+                        x = end + gap
+                    }
+                }
+                Text(averageLabel, style = MaterialTheme.typography.labelSmall, color = avgColor)
             }
         }
     }

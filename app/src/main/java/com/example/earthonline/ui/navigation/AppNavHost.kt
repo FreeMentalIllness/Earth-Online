@@ -23,6 +23,10 @@ import com.example.earthonline.ui.map.MapRoute
 import com.example.earthonline.ui.profile.ProfileRoute
 import com.example.earthonline.ui.report.ReportRoute
 import com.example.earthonline.ui.settings.SettingsRoute
+import com.example.earthonline.ui.settings.AppearanceRoute
+import com.example.earthonline.ui.settings.GeneralRoute
+import com.example.earthonline.ui.settings.BackupSyncRoute
+import com.example.earthonline.ui.settings.AboutRoute
 import com.example.earthonline.ui.tasks.TasksRoute
 
 /**
@@ -107,5 +111,18 @@ fun AppNavHost(
         composable(Screen.Map.route) { MapRoute(moreActions = moreActions) }
         composable(Screen.Ai.route) { AiRoute(moreActions = moreActions) }
         composable(Screen.Settings.route) { SettingsRoute(moreActions = moreActions) }
+        // v1.2.3：集中设置页拆出的二级页（独立路由，返回栈由 NavHost 维护）
+        composable(Screen.SettingsAppearance.route) {
+            AppearanceRoute(navController = navController, moreActions = moreActions)
+        }
+        composable(Screen.SettingsGeneral.route) {
+            GeneralRoute(navController = navController, moreActions = moreActions)
+        }
+        composable(Screen.SettingsBackupSync.route) {
+            BackupSyncRoute(navController = navController, moreActions = moreActions)
+        }
+        composable(Screen.SettingsAbout.route) {
+            AboutRoute(navController = navController, moreActions = moreActions)
+        }
     }
 }

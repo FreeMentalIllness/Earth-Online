@@ -75,10 +75,15 @@ fun TasksScreen(
     var showAdd by remember { mutableStateOf(openAddOnEntry) }
     var addParentId by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<TaskEntity?>(null) }
+    // v1.2.3：「已完成」视图开关，便于回溯已经做完的任务
+    var showDoneOnly by remember { mutableStateOf(false) }
 
     val filtered = remember(allTasks, category) { allTasks.filter { it.category == category } }
     val tree = remember(filtered) { buildTaskTree(filtered) }
     val flat = remember(tree, collapsed.value) { flattenTaskTree(tree, collapsed.value) }
+    val visible = remember(flat, showDoneOnly) {
+        if (showDoneOnly) flat.filter { it.task.status == "done" } else flat
+    }
 
     // 编辑对话框里的「父任务」候选：同分类下的全部任务（编辑自身时要排除自己及其后代，避免成环）
     val parentOptions = remember(filtered, editing) {
@@ -133,6 +138,12 @@ fun TasksScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
+                    FilterChip(
+                        selected = showDoneOnly,
+                        onClick = { showDoneOnly = !showDoneOnly },
+                        label = { Text("已完成 $doneCount") },
+                        modifier = Modifier.height(32.dp)
+                    )
                     IconButton(onClick = { collapsed.value = emptySet() }) {
                         Icon(Icons.Filled.UnfoldMore, contentDescription = "全部展开")
                     }
@@ -147,33 +158,32 @@ fun TasksScreen(
                 }
             }
 
-            if (flat.isEmpty()) {
-                // v1.2.1：空状态引导 —— 光秃秃一行「暂无任务」不告诉用户下一步该干嘛
-                val (label, hint, cta) = when (category) {
-                    "main" -> Triple(
-                        "主线还是空白的",
-                        "主线是你真正想推进的事：学会一样东西、跑完一次半马、把房间收拾干净。" +
-                            "先立一条，之后可以拆成子任务慢慢啃。",
-                        "创建主线任务"
+            if (visible.isEmpty()) {
+                if (showDoneOnly) {
+                    // v1.2.3：「已完成」视图为空时，给一句正向引导（不再重复「创建」按钮，添加走右下角 FAB）
+                    EmptyState(
+                        emoji = "✅",
+                        title = "还没有已完成的任务",
+                        message = "完成一条任务就会出现在这里，方便你回顾一路走来的脚印。"
                     )
-                    "side" -> Triple(
-                        "还没有支线",
-                        "支线是那些「想做但没那么急」的事。想到就记下来，免得转头忘了。",
-                        "创建支线任务"
-                    )
-                    else -> Triple(
-                        "To Do 是空的",
-                        "临时冒出来的小事往这儿丢：交水电费、回个消息、买瓶酱油。做完划掉就行。",
-                        "创建 To Do"
+                } else {
+                    // v1.2.1：空状态引导 —— 光秃秃一行「暂无任务」不告诉用户下一步该干嘛
+                    val (label, hint) = when (category) {
+                        "main" -> "主线还是空白的" to
+                            "主线是你真正想推进的事：学会一样东西、跑完一次半马、把房间收拾干净。" +
+                                "先立一条，之后可以拆成子任务慢慢啃。"
+                        "side" -> "还没有支线" to
+                            "支线是那些「想做但没那么急」的事。想到就记下来，免得转头忘了。"
+                        else -> "To Do 是空的" to
+                            "临时冒出来的小事往这儿丢：交水电费、回个消息、买瓶酱油。做完划掉就行。"
+                    }
+                    // v1.2.3：去掉重复的「创建」按钮 —— 新建任务统一由右下角 FAB 负责，避免两个入口打架
+                    EmptyState(
+                        emoji = "📋",
+                        title = label,
+                        message = hint
                     )
                 }
-                EmptyState(
-                    emoji = "📋",
-                    title = label,
-                    message = hint,
-                    actionLabel = cta,
-                    onAction = { addParentId = null; showAdd = true }
-                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(horizontal = UiDimens.ListPad),
@@ -181,7 +191,7 @@ fun TasksScreen(
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     items(
-                        flat,
+                        visible,
                         key = { it.task.id },
                         // contentType 告诉 Compose「这些格子长得一样」，滚动时可以直接复用
                         // 上一个同类格子的测量结果与组合结果，省掉一次重新组合

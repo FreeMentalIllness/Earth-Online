@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.EmptyHint
 import com.example.earthonline.ui.components.MoreMenuActions
@@ -40,6 +42,9 @@ import com.example.earthonline.ui.components.TagChip
 import com.example.earthonline.ui.components.UiDimens
 import com.example.earthonline.ui.components.UserAvatar
 import com.example.earthonline.ui.theme.AmberPrimary
+
+/** 主页 LazyColumn 中「人生时间轴」卡片的位置（0 基），供头像卡片「时光机」按钮滚动定位 */
+private const val TIMELINE_INDEX = 7
 
 /** 首页入口（对应 HTML renderHome） */
 @Composable
@@ -82,6 +87,9 @@ fun HomeScreen(
     onPickResult: (SearchHit) -> Unit = {}
 ) {
     val context = LocalContext.current
+    // v1.2.3：头像卡片上的「时光机」按钮滚动到人生时间轴卡片（把低频入口上移、提前曝光）
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var memoInput by remember { mutableStateOf("") }
     var memoType by remember { mutableStateOf("note") }
 
@@ -99,6 +107,7 @@ fun HomeScreen(
     LazyColumn(
         // v1.2.1：世界日志输入框在页面中部，键盘弹起时若不收缩可视高度，
         // 输入框会被键盘整个盖住（用户看不到自己在打什么）。imePadding 让列表底部腾出键盘高度。
+        state = listState,
         modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(
             start = UiDimens.ScreenPad,
@@ -122,7 +131,8 @@ fun HomeScreen(
         item(key = "hero", contentType = "hero") {
             HeroBanner(
                 state = state,
-                onAvatarClick = { onNavigate("profile") }
+                onAvatarClick = { onNavigate("profile") },
+                onTimeline = { scope.launch { listState.scrollToItem(TIMELINE_INDEX) } }
             )
         }
 
@@ -463,7 +473,7 @@ private fun HomeTitleBar(actions: MoreMenuActions) {
 }
 
 @Composable
-private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit) {
+private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit, onTimeline: () -> Unit = {}) {
     Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.padding(16.dp).fillMaxWidth(),
@@ -522,6 +532,14 @@ private fun HeroBanner(state: HomeUiState, onAvatarClick: () -> Unit) {
                     progress = if (state.life.hasBirth) state.life.progress else 0f,
                     modifier = Modifier.width(88.dp)
                 )
+                Spacer(Modifier.height(6.dp))
+                TextButton(
+                    onClick = onTimeline,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text("🕰 时光机", style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
@@ -621,7 +639,7 @@ private fun OverviewGrid(state: HomeUiState, onNavigate: (String) -> Unit) {
                 modifier = Modifier.weight(1f).fillMaxHeight()
             ) { onNavigate("achievements") }
             OverviewCard(
-                icon = "📝", label = "灵感",
+                icon = "📝", label = "世界日志",
                 lines = listOf("共 ${state.totalMemos} 条", "今日 ${state.todayMemoCount} 条", state.latestMemo),
                 modifier = Modifier.weight(1f).fillMaxHeight()
             ) { onNavigate("data") }
@@ -682,13 +700,11 @@ private data class QuickEntry(
 
 private val QUICK_ENTRIES = listOf(
     QuickEntry("📝", "新建任务", "new_task"),
-    QuickEntry("🎒", "添加物品", "backpack"),
-    QuickEntry("🏆", "查看成就", "achievements"),
-    QuickEntry("📅", "今日日程", "data"),
-    QuickEntry("🎭", "心情", MOOD_ROUTE),
+    QuickEntry("🎭", "记心情", MOOD_ROUTE),
     QuickEntry("🤖", "系统", "ai"),
     QuickEntry("📊", "记账", null),
-    QuickEntry("🗺️", "足迹地图", "map")
+    QuickEntry("🏆", "成就", "achievements"),
+    QuickEntry("🗺️", "足迹", "map")
 )
 
 /** 心情选项（与 Web 端 MOOD_CHOICES 一致） */
@@ -707,7 +723,7 @@ private fun QuickGrid(
     Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionHeader("⚡ 快速入口")
-            QUICK_ENTRIES.chunked(4).forEach { rowItems ->
+            QUICK_ENTRIES.chunked(3).forEach { rowItems ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     rowItems.forEach { entry ->
                         QuickTile(entry, Modifier.weight(1f)) {
@@ -743,7 +759,7 @@ private fun MoodPickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "选一个就行，会记进世界日志（类型：心情）。纯表情的记录还有隐藏彩蛋哦。",
+                    "选一个就行，会记进世界日志并归类为「心情」——和写日志时选的「心情」分类是同一种记录，只是这里不用打字。纯表情的记录还有隐藏彩蛋哦。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

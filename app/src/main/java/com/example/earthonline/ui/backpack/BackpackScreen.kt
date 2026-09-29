@@ -17,11 +17,14 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,7 +75,13 @@ fun BackpackScreen(
         topBar = {
             TopAppBar(
                 title = { Text("背包") },
-                actions = { SettingsIconButton(actions = moreActions) }
+                actions = {
+                    // v1.2.3：分类管理入口移到右上角，与筛选条解耦，避免「筛选」与「管理」入口重叠
+                    IconButton(onClick = { showCategoryManager = true }) {
+                        Icon(Icons.Filled.Tune, contentDescription = "分类管理")
+                    }
+                    SettingsIconButton(actions = moreActions)
+                }
             )
         },
         floatingActionButton = {
@@ -83,18 +92,14 @@ fun BackpackScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("物品") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("收藏") })
-            }
+            TabToggle(selected = tab, onSelect = { tab = it })
             if (tab == 0) {
                 ItemsPane(
                     items = items,
                     categories = itemCats,
                     vm = vm,
                     // 空状态里的「添加第一件物品」要能打开父级的新增对话框
-                    onAddItem = { showItem = true },
-                    onManageCategories = { showCategoryManager = true }
+                    onAddItem = { showItem = true }
                 )
             } else {
                 CollectionsPane(
@@ -102,8 +107,7 @@ fun BackpackScreen(
                     categories = collectionCats,
                     vm = vm,
                     context = context,
-                    onAddCollection = { showCollection = true },
-                    onManageCategories = { showCategoryManager = true }
+                    onAddCollection = { showCollection = true }
                 )
             }
         }
@@ -147,8 +151,7 @@ private fun ItemsPane(
     items: List<ItemEntity>,
     categories: List<BagCategoryEntity>,
     vm: BackpackViewModel,
-    onAddItem: () -> Unit,
-    onManageCategories: () -> Unit
+    onAddItem: () -> Unit
 ) {
     // 顶部模糊搜索（名称 / 描述 / 分类）
     var query by remember { mutableStateOf("") }
@@ -181,8 +184,7 @@ private fun ItemsPane(
         CategoryFilterRow(
             categories = categories,
             selected = cat,
-            onSelect = { cat = it },
-            onManage = onManageCategories
+            onSelect = { cat = it }
         )
         if (filtered.isEmpty()) {
             if (items.isEmpty()) {
@@ -247,8 +249,7 @@ private fun CollectionsPane(
     categories: List<BagCategoryEntity>,
     vm: BackpackViewModel,
     context: Context,
-    onAddCollection: () -> Unit,
-    onManageCategories: () -> Unit
+    onAddCollection: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var cat by remember { mutableStateOf<String?>(null) }
@@ -277,8 +278,7 @@ private fun CollectionsPane(
         CategoryFilterRow(
             categories = categories,
             selected = cat,
-            onSelect = { cat = it },
-            onManage = onManageCategories
+            onSelect = { cat = it }
         )
         if (filtered.isEmpty()) {
             if (collections.isEmpty()) {
@@ -474,5 +474,47 @@ private fun formatSize(bytes: Long): String {
         bytes < 1024 -> "$bytes B"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"
         else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    }
+}
+
+/**
+ * v1.2.3：物品 / 收藏 切换由 Material 顶部 Tab 改为「胶囊分段控件」。
+ * 原来两个 Tab 之间有一条贯穿的指示线，视觉上把页面「切」成两半；
+ * 现在用同一颗药丸里两段等分的按铃，选中段填主题暖色，整体是一个连续控件，
+ * 切换时不再有「分割感」。
+ */
+@Composable
+private fun TabToggle(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = UiDimens.ListPad, vertical = 8.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            TabToggleButton("物品", selected = selected == 0) { onSelect(0) }
+            TabToggleButton("收藏", selected = selected == 1) { onSelect(1) }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.TabToggleButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.weight(1f).height(38.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

@@ -27,7 +27,6 @@ fun CategoryFilterRow(
     categories: List<BagCategoryEntity>,
     selected: String?,
     onSelect: (String?) -> Unit,
-    onManage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -47,13 +46,6 @@ fun CategoryFilterRow(
                 label = { Text(c.name) }
             )
         }
-        AssistChip(
-            onClick = onManage,
-            label = { Text("分类管理") },
-            leadingIcon = {
-                Icon(Icons.Filled.Tune, null, Modifier.size(16.dp))
-            }
-        )
     }
 }
 

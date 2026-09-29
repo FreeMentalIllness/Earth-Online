@@ -12,6 +12,15 @@ sealed class Screen(val route: String, val label: String) {
     object Ai : Screen("ai", "系统")
     object Settings : Screen("settings", "设置")
 
+    /**
+     * v1.2.3：集中设置页拆出的二级页（点击列表项跳转，各自带返回导航栏）。
+     * 用独立路由而非折叠面板，返回栈由 NavHost 维护，从二级页返回正确落到设置主页。
+     */
+    object SettingsAppearance : Screen("settings_appearance", "外观")
+    object SettingsGeneral : Screen("settings_general", "通用")
+    object SettingsBackupSync : Screen("settings_backup_sync", "数据与备份")
+    object SettingsAbout : Screen("settings_about", "关于")
+
     /** v1.0.0：周期报告（日报 / 周报 / 年报）。从数据看板页进入，不是底部 Tab。 */
     object Report : Screen("report", "周期报告")
 
@@ -29,3 +38,17 @@ sealed class Screen(val route: String, val label: String) {
      */
     object NewTask : Screen("new_task", "新建任务")
 }
+
+/**
+ * 设置二级页路由集合（供 MainScaffold 判断「系统返回键应弹栈而非回主页」）。
+ *
+ * v1.2.3：必须是**文件级顶层**声明。MainScaffold 通过
+ * `import com.example.earthonline.ui.navigation.settingsSubRoutes` 直接引用它；
+ * 若误放进 Screen 类体内，它会变成每个路由对象的实例属性，顶层引用将无法解析（编译报错）。
+ */
+val settingsSubRoutes = setOf(
+    Screen.SettingsAppearance.route,
+    Screen.SettingsGeneral.route,
+    Screen.SettingsBackupSync.route,
+    Screen.SettingsAbout.route
+)
