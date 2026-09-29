@@ -54,8 +54,23 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 }
 
 /**
+ * v4 -> v5：为高频查询列补索引（只加索引，不改列/表，数据零风险）。
+ * tasks.doneAt     —— 完成任务数按区间统计（报告页每日聚合）；
+ * activities.time  —— 最近动态 / 全部动态按时间倒序与区间过滤；
+ * locations.date   —— 足迹按日期区间过滤与年月分组。
+ * 索引名与 @Entity(indices=[...]) 声明保持一致（Room schema 校验要求双向匹配）。
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_doneAt` ON `tasks` (`doneAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_activities_time` ON `activities` (`time`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_locations_date` ON `locations` (`date`)")
+    }
+}
+
+/**
  * 主数据库（对应 HTML 的单一主存档键 `earth_data`，本端归一化为多表）。
- * version=4；迁移链 MIGRATION_1_2 / MIGRATION_2_3 / MIGRATION_3_4
+ * version=5；迁移链 MIGRATION_1_2 / MIGRATION_2_3 / MIGRATION_3_4 / MIGRATION_4_5
  *（fallbackToDestructiveMigration 仅作无匹配迁移时的兜底）。
  */
 @Database(
@@ -70,7 +85,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         ActivityEntity::class,
         BagCategoryEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -97,7 +112,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DB_NAME
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }

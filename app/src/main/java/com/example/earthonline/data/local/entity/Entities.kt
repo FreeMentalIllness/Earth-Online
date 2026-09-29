@@ -2,6 +2,7 @@ package com.example.earthonline.data.local.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
@@ -58,7 +59,7 @@ data class ProfileEntity(
 
 /** 任务（支持父子嵌套；对应 HTML state.tasks） */
 @Serializable
-@Entity(tableName = "tasks")
+@Entity(tableName = "tasks", indices = [Index("doneAt")])
 data class TaskEntity(
     @PrimaryKey val id: String,
     val parentId: String? = null,
@@ -127,7 +128,7 @@ data class CollectionEntity(
 
 /** 足迹地图坐标（对应 HTML state.locations） */
 @Serializable
-@Entity(tableName = "locations")
+@Entity(tableName = "locations", indices = [Index("date")])
 data class LocationEntity(
     @PrimaryKey val id: String,
     val name: String = "",
@@ -140,7 +141,7 @@ data class LocationEntity(
 
 /** 最近动态 feed（对应 HTML state.activities，最多保留 50 条环形裁剪） */
 @Serializable
-@Entity(tableName = "activities")
+@Entity(tableName = "activities", indices = [Index("time")])
 data class ActivityEntity(
     @PrimaryKey val id: String,
     val time: String = "",               // ISO
