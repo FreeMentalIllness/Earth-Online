@@ -1009,7 +1009,12 @@ private fun LifeCard(
     Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionHeader("🌍 地球Online · 人生卡片")
-            Text(name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 昵称加前缀，避免纯数字昵称（如「1」）看起来像渲染残留
+            Text(
+                if (name.isBlank()) "未命名旅行者" else "昵称：$name",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly

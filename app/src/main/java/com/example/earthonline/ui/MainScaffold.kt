@@ -2,14 +2,18 @@ package com.example.earthonline.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -18,7 +22,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -47,6 +53,7 @@ import com.example.earthonline.ui.navigation.bottomNavItems
 import com.example.earthonline.ui.navigation.settingsSubRoutes
 import com.example.earthonline.ui.settings.SettingsViewModel
 import com.example.earthonline.util.AchievementSound
+import com.example.earthonline.util.rememberIsOnline
 import android.app.Activity
 import android.widget.Toast
 import java.io.File
@@ -172,13 +179,14 @@ fun MainScaffold(
                         onClick = { navigateToTab(navController, item.route) },
                         icon = { Icon(painterResource(item.iconRes), contentDescription = item.label) },
                         label = { Text(item.label) },
-                        // v1.2.3：底部导航配色统一为「深棕灰未选 / 暖琥珀选中」，
-                        // 与全局视觉基线（木质暖调）一致，不再随主题色随机漂移。
+                        // v1.2.3：底部导航配色统一为「暖琥珀选中」。
+                        // v1.0.2+：未选中色改为主题派生（浅色=深棕灰 / 深色=浅灰 #B6B6BF 系），
+                        // 修复深色模式下 #6B5B4F 对比度不足的问题。
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = AmberPrimary,
-                            unselectedIconColor = Color(0xFF6B5B4F),
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             selectedTextColor = AmberPrimary,
-                            unselectedTextColor = Color(0xFF6B5B4F),
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             indicatorColor = AmberPrimary.copy(alpha = 0.14f)
                         )
                     )
@@ -186,6 +194,8 @@ fun MainScaffold(
             }
         }
     ) { innerPadding ->
+        val darkTheme = isSystemInDarkTheme()
+        val isOnline by rememberIsOnline()
         Box(Modifier.fillMaxSize()) {
             if (wallpaperRequest != null) {
                 AsyncImage(
@@ -196,27 +206,53 @@ fun MainScaffold(
                 )
                 /* 性能：用「背景色蒙层」表达不透明度，而不是给图片设 alpha。
                    alpha < 1 会为整张全屏图创建离屏图层（saveLayer），每帧多一次全屏合成；
-                   蒙层只是一个半透明矩形，几乎零成本。 */
+                   蒙层只是一个半透明矩形，几乎零成本。
+                   深色模式：壁纸透出量压到浅色的 4 折 —— 否则亮色壁纸（如蓝橙渐变）
+                   会在近黑卡片背后强烈透出，破坏夜间一致性。 */
+                val showThrough = if (darkTheme) wallpaperAlpha * 0.4f else wallpaperAlpha
                 Box(
                     Modifier
                         .fillMaxSize()
                         .background(
                             MaterialTheme.colorScheme.background.copy(
-                                alpha = (1f - wallpaperAlpha).coerceIn(0f, 1f)
+                                alpha = (1f - showThrough).coerceIn(0f, 1f)
                             )
                         )
                 )
             }
+            // 大屏/折叠屏适配：内容区限宽居中，避免展开态单列拉满全宽
             AppNavHost(
                 navController = navController,
                 startDestination = startRoute,
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 560.dp)
+                    .align(Alignment.TopCenter)
+                    .padding(innerPadding),
                 achVm = achVm,
                 moreActions = MoreMenuActions(
                     onNavigate = { route -> navController.navigate(route) { launchSingleTop = true } },
                     onAccounting = { showAccounting = true }
                 )
             )
+            // 全局离线横幅：覆盖所有 Tab 与二级页（含地图 / WebDAV / AI 页）
+            if (!isOnline) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = innerPadding.calculateTopPadding() + 8.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    tonalElevation = 4.dp
+                ) {
+                    Text(
+                        "网络不可用，请检查网络连接",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
             // v1.2.1：成就解锁提示（右下角卡片 + 音效），浮在所有页面与导航栏之上
             AchievementUnlockHost(vm = achVm)
             if (showAccounting) {

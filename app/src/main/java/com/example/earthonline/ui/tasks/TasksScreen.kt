@@ -197,6 +197,7 @@ fun TasksScreen(
                         // 上一个同类格子的测量结果与组合结果，省掉一次重新组合
                         contentType = { "taskRow" }
                     ) { node ->
+                        Box(Modifier.animateItem()) {
                         TaskRow(
                             node = node,
                             collapsed = collapsed.value.contains(node.task.id),
@@ -211,6 +212,7 @@ fun TasksScreen(
                             onAddChild = { addParentId = node.task.id; showAdd = true },
                             onDelete = { vm.deleteCascade(node.task.id) }
                         )
+                        }
                     }
                 }
             }

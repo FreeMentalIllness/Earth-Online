@@ -209,7 +209,7 @@ private fun ItemsPane(
                     filtered,
                     key = { it.id },
                     contentType = { "itemCard" }
-                ) { ItemCard(it, vm::deleteItem) }
+                ) { Box(Modifier.animateItem()) { ItemCard(it, vm::deleteItem) } }
             }
         }
     }
@@ -302,7 +302,7 @@ private fun CollectionsPane(
                     filtered,
                     key = { it.id },
                     contentType = { "collectionCard" }
-                ) { CollectionCard(it, vm, context) }
+                ) { Box(Modifier.animateItem()) { CollectionCard(it, vm, context) } }
             }
         }
     }

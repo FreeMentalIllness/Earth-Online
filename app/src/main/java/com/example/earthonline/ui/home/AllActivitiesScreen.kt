@@ -163,7 +163,7 @@ fun AllActivitiesRoute(
                             "custom" -> "⭐" to "自定义事件"
                             else -> "💭" to "记录"
                         }
-                        Card(Modifier.fillMaxWidth()) {
+                        Card(Modifier.fillMaxWidth().animateItem()) {
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),

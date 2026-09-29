@@ -81,7 +81,17 @@ class AiViewModel @Inject constructor(
                     ?: "（无返回内容）"
                 _messages.value = _messages.value + UiMessage("assistant", content)
             } catch (e: Exception) {
-                _messages.value = _messages.value + UiMessage("assistant", "请求失败：${e.message}")
+                // 异常映射：不再把英文堆栈原文怼给用户，按原因给可操作的中文提示
+                val friendly = when (e) {
+                    is java.net.UnknownHostException, is java.net.ConnectException ->
+                        "无网络连接，请检查网络后重试"
+                    is java.net.SocketTimeoutException ->
+                        "请求超时，请稍后重试"
+                    is java.io.IOException ->
+                        "网络异常，请检查网络后重试"
+                    else -> "服务异常：${e.message ?: "未知错误"}"
+                }
+                _messages.value = _messages.value + UiMessage("assistant", friendly)
             } finally {
                 _loading.value = false
             }

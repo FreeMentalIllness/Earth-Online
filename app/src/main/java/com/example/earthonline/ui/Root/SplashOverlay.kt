@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,28 +55,25 @@ import kotlinx.coroutines.delay
 const val SPLASH_MIN_MS = 900L
 
 /**
- * v1.0.0：开屏底色 = **纯白**。
+ * v1.0.0：开屏底色 = **纯白**（浅色模式）。
  *
  * 必须与 `res/values/colors.xml` 的 `splash_background`、
  * `values(-v31)/themes.xml` 的 `windowSplashScreenBackground` 是同一个值。
  * 冷启动是三段接力：系统启动窗口 → 本开屏页 → 主界面。
  * 前两段只要有一处色值不一致，交接那一帧就会「换底色」，也就是用户看到的割裂感。
  *
- * ## 为什么系统那一层改成纯白 + 不放图标
- * 之前系统启动图自带「白底 + 一个孤零零的地球」，本页再演一遍「地球 + 光晕 + 文字」，
- * 于是冷启动第一眼是系统那张丑图，然后才跳到带光环的完整版 —— 这就是割裂感的来源。
- * 现在系统层只负责「进程一起来就有一屏干净的纯白」（顺带盖掉首帧之前的空白），
- * 品牌动画 100% 由本页演出：白屏之上元素依次淡入，观感是「应用自己亮起来了」，
- * 而不是「换了一屏」。
- *
- * 这里刻意**不跟随深色主题**：深色模式下最后从白色淡出到深色界面，
- * 由 260ms 的淡出动画盖住，观感上是自然的收尾。
+ * v1.0.2+：增加深色变体（#1A1A1A，与 values-night 的 background_dark 同源），
+ * 消除深色模式下「系统启动窗口深色 → Compose 开屏纯白」的白闪。
+ * 系统层已由 values-night/themes.xml 同步覆盖，三段在各自模式下依然同色。
  */
-val SplashBackground = Color.White
+val SplashBackground: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1A1A1A) else Color.White
 
-/** 开屏文字色：底色固定米色，文字就必须固定深色，不能用 colorScheme.onBackground（深色模式下那是浅色字，等于隐形） */
-private val SplashTextPrimary = Color(0xFF1E1A16)
-private val SplashTextSecondary = Color(0xFF7A7268)
+/** 开屏文字色：跟随开屏底色 —— 浅色底配深字，深色底配浅字（#F2F2F5），保证两种模式下都可读 */
+private val SplashTextPrimary: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFF2F2F5) else Color(0xFF1E1A16)
+private val SplashTextSecondary: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFA9A196) else Color(0xFF7A7268)
 
 /**
  * v1.2.1：自绘开屏动画。

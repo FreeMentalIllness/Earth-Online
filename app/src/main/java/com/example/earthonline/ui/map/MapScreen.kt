@@ -321,7 +321,7 @@ private fun LocationList(locations: List<LocationEntity>, onDelete: (LocationEnt
             key = { it.id },
             contentType = { "locationRow" }
         ) { loc ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth().animateItem()) {
                 Row(
                     Modifier.fillMaxWidth().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,

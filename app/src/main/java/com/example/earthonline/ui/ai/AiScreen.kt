@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
 import com.example.earthonline.ui.settings.AiConfigDialog
+import kotlinx.coroutines.launch
 
 @Composable
 fun AiRoute(moreActions: MoreMenuActions, vm: AiViewModel = hiltViewModel()) =
@@ -34,6 +35,8 @@ fun AiScreen(vm: AiViewModel, moreActions: MoreMenuActions) {
     val aiConfigJson by vm.aiConfigFlow.collectAsStateWithLifecycle(initialValue = "")
     var showConfig by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -84,7 +87,14 @@ fun AiScreen(vm: AiViewModel, moreActions: MoreMenuActions) {
                         maxLines = 4
                     )
                     Spacer(Modifier.width(8.dp))
-                    IconButton(onClick = { vm.send() }, enabled = !loading) {
+                    IconButton(onClick = {
+                        // 发送前离线拦截：无网时直接给明确文案，不等请求失败
+                        if (!com.example.earthonline.util.NetworkMonitor.isOnlineNow(context)) {
+                            scope.launch { snackbar.showSnackbar("网络不可用，请检查网络连接") }
+                        } else {
+                            vm.send()
+                        }
+                    }, enabled = !loading) {
                         Icon(Icons.Filled.Send, contentDescription = "发送")
                     }
                 }

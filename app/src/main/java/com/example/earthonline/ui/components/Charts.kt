@@ -108,7 +108,8 @@ fun BarChart(
     }
     val max = items.maxOf { it.value }.coerceAtLeast(1)
     val avg = averageValue?.let { if (it > 0) it.coerceAtMost(max) else null }
-    val avgColor = Color(0xFF8A6D3B) // 暖棕，与琥珀柱对比
+    // 主题派生：浅色=暖棕 / 深色=浅灰系，消除硬编码色值在深色下的不可辨
+    val avgColor = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(maxHeight)) {
             // 均值线先画（在柱子之后声明的 Row 之上会被柱子盖住，符合预期）

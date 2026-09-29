@@ -423,8 +423,12 @@ fun BackupSyncRoute(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = {
-                                davTesting = true
-                                scope.launch { val r = vm.testDav(cfg); davTesting = false; snackbar.showSnackbar(r) }
+                                if (!com.example.earthonline.util.NetworkMonitor.isOnlineNow(context)) {
+                                    scope.launch { snackbar.showSnackbar("网络不可用，请检查网络连接") }
+                                } else {
+                                    davTesting = true
+                                    scope.launch { val r = vm.testDav(cfg); davTesting = false; snackbar.showSnackbar(r) }
+                                }
                             },
                             enabled = !davTesting,
                             modifier = Modifier.weight(1f)
@@ -433,8 +437,12 @@ fun BackupSyncRoute(
                         }
                         OutlinedButton(
                             onClick = {
-                                davSyncing = true
-                                scope.launch { val r = vm.syncToDav(cfg); davSyncing = false; snackbar.showSnackbar(r) }
+                                if (!com.example.earthonline.util.NetworkMonitor.isOnlineNow(context)) {
+                                    scope.launch { snackbar.showSnackbar("网络不可用，请检查网络连接") }
+                                } else {
+                                    davSyncing = true
+                                    scope.launch { val r = vm.syncToDav(cfg); davSyncing = false; snackbar.showSnackbar(r) }
+                                }
                             },
                             enabled = !davSyncing,
                             modifier = Modifier.weight(1f)
@@ -444,8 +452,12 @@ fun BackupSyncRoute(
                     }
                     OutlinedButton(
                         onClick = {
-                            davPulling = true
-                            scope.launch { val r = vm.syncFromDav(cfg); davPulling = false; snackbar.showSnackbar(r) }
+                            if (!com.example.earthonline.util.NetworkMonitor.isOnlineNow(context)) {
+                                scope.launch { snackbar.showSnackbar("网络不可用，请检查网络连接") }
+                            } else {
+                                davPulling = true
+                                scope.launch { val r = vm.syncFromDav(cfg); davPulling = false; snackbar.showSnackbar(r) }
+                            }
                         },
                         enabled = !davPulling,
                         modifier = Modifier.fillMaxWidth()

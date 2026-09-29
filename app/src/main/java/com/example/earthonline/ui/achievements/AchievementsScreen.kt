@@ -162,11 +162,13 @@ fun AchievementsScreen(vm: AchievementViewModel, moreActions: MoreMenuActions) {
                             key = { it.entity.id },
                             contentType = { "achCard" }
                         ) { ui ->
-                            AchievementCard(
-                                ui = ui,
-                                onToggle = { vm.toggleManual(ui.entity) },
-                                onDelete = { vm.deleteManual(ui.entity) }
-                            )
+                            Box(Modifier.animateItem()) {
+                                AchievementCard(
+                                    ui = ui,
+                                    onToggle = { vm.toggleManual(ui.entity) },
+                                    onDelete = { vm.deleteManual(ui.entity) }
+                                )
+                            }
                         }
                     }
                 }

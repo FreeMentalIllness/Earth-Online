@@ -23,6 +23,19 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
 
     private fun auth(c: DavConfig) = Credentials.basic(c.user, c.pass)
 
+    /**
+     * HTTP 状态码 → 可操作的中文提示。
+     * 用户不该面对裸状态码猜原因：401/403 指向账号密码，404 指向路径，5xx 指向服务端。
+     */
+    private fun friendlyError(op: String, code: Int): Nothing = error(
+        when (code) {
+            401, 403 -> "密码或地址错误（$code），请检查 WebDAV 账号与密码"
+            404 -> "路径不存在（404），请检查服务器目录"
+            in 500..599 -> "服务器暂时不可用（$code），请稍后重试"
+            else -> "$op 失败（$code），请检查网络与服务器配置"
+        }
+    )
+
     private fun join(base: String, path: String): String {
         val b = if (base.endsWith("/")) base else "$base/"
         val p = path.removePrefix("/")
@@ -41,7 +54,7 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
                     .header("Depth", "1")
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) error("PROPFIND 失败：${resp.code}")
+                    if (!resp.isSuccessful) friendlyError("连接测试", resp.code)
                     parseProps(resp.body?.string().orEmpty())
                 }
             }
@@ -57,7 +70,7 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
                     .header("Authorization", auth(config))
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) error("上传失败：${resp.code}")
+                    if (!resp.isSuccessful) friendlyError("上传", resp.code)
                 }
             }
         }
@@ -71,7 +84,7 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
                     .header("Authorization", auth(config))
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) error("下载失败：${resp.code}")
+                    if (!resp.isSuccessful) friendlyError("下载", resp.code)
                     resp.body?.bytes() ?: byteArrayOf()
                 }
             }
@@ -86,7 +99,7 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
                     .header("Authorization", auth(config))
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) error("删除失败：${resp.code}")
+                    if (!resp.isSuccessful) friendlyError("删除", resp.code)
                 }
             }
         }
@@ -100,7 +113,7 @@ class WebDavService @Inject constructor(private val client: OkHttpClient) {
                     .header("Authorization", auth(config))
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful && resp.code != 405) error("建目录失败：${resp.code}")
+                    if (!resp.isSuccessful && resp.code != 405) friendlyError("建目录", resp.code)
                 }
             }
         }
