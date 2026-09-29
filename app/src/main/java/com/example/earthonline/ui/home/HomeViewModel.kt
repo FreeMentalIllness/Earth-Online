@@ -113,11 +113,15 @@ data class HomeUiState(
     val locationCount: Int = 0,
     val recentMemos: List<MemoEntity> = emptyList(),
     val recentActs: List<ActivityEntity> = emptyList(),
+    /** 全量动态（类型筛选后，不限条数）——「全部动态」页使用 */
+    val allActs: List<ActivityEntity> = emptyList(),
     val timeline: List<TimelineItem> = emptyList(),
     /** 用户手动添加的里程碑事件（与时间轴自动事件合并展示） */
     val customTimeline: List<TimelineItem> = emptyList(),
     /** 最近动态显示类型筛选（供 UI 回显 FilterChip 选中态） */
-    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo")
+    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
+    /** 最近动态首页显示条数（0 = 不限制） */
+    val feedLimit: Int = 3
 ) {
     val doneRatio: Int get() = if (totalTasks > 0) Math.round(doneTasks * 100f / totalTasks) else 0
     /** v1.2.0：成就进度（概览卡第三行，四卡统一三行文案用） */
@@ -147,7 +151,8 @@ private data class Parts(
     val doneTaskRows: List<TaskEntity> = emptyList(),
     val collectionCount: Int = 0,
     val customTimeline: List<TimelineItem> = emptyList(),
-    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo")
+    val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
+    val feedLimit: Int = 3
 )
 
 /**
@@ -178,7 +183,8 @@ class HomeViewModel @Inject constructor(
     ) { u, t, l -> AchStat(u, t, l) }
     private val itemFlow = combine(itemRepo.count(), itemRepo.categoryCount()) { i, c -> ItemStat(i, c) }
     private val locFlow = combine(locationRepo.count(), locationRepo.observeRecent(TIMELINE_LIMIT)) { n, l -> LocStat(n, l) }
-    private val actFlow = activityRepo.observeRecent(ACT_LIMIT)
+    // 全量动态（表内环形裁剪最多 50 条），首页 take(feedLimit)，全部动态页完整展示
+    private val actFlow = activityRepo.observeRecent(200)
     private val doneTaskFlow = taskRepo.observeDoneRecent(TIMELINE_LIMIT)
     // v1.2.0：概览「背包」卡第三行要显示收藏数
     private val collectionFlow = collectionRepo.count()
@@ -199,6 +205,9 @@ class HomeViewModel @Inject constructor(
             .getOrDefault(setOf("task", "ach", "item", "memo"))
     }
 
+    /** 最近动态首页显示条数（0 = 不限制；旧版本无该键默认 3，与原 ACT_LIMIT 一致） */
+    private val feedLimitFlow: Flow<Int> = settingsDs.homeFeedLimit
+
     val state: StateFlow<HomeUiState> =
         combine(profileFlow, taskFlow, memoFlow, achFlow, itemFlow) { p, t, m, a, i ->
             Parts(p, t, m, a, i)
@@ -209,6 +218,7 @@ class HomeViewModel @Inject constructor(
             .combine(collectionFlow) { parts, c -> parts.copy(collectionCount = c) }
             .combine(customFlow) { parts, custom -> parts.copy(customTimeline = custom) }
             .combine(feedFilterFlow) { parts, kinds -> parts.copy(feedKinds = kinds) }
+            .combine(feedLimitFlow) { parts, limit -> parts.copy(feedLimit = limit) }
             .map { it.toUi() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -258,6 +268,27 @@ class HomeViewModel @Inject constructor(
                 json.encodeToString(SetSerializer(String.serializer()), kinds)
             )
         }
+    }
+
+    /** 设置最近动态首页显示条数（0 = 不限制） */
+    fun setFeedLimit(n: Int) {
+        viewModelScope.launch { settingsDs.setHomeFeedLimit(n) }
+    }
+
+    /** 用户在「全部动态」页手动添加一条自定义动态（kind=custom，随动态流展示） */
+    fun addCustomActivity(title: String) {
+        val t = title.trim()
+        if (t.isBlank()) return
+        viewModelScope.launch {
+            activityRepo.add(
+                ActivityEntity(id = uid("act"), time = nowIso(), kind = "custom", title = t.take(60))
+            )
+        }
+    }
+
+    /** 删除一条动态（主要供自定义动态删除） */
+    fun deleteActivity(id: String) {
+        viewModelScope.launch { activityRepo.delete(id) }
     }
 
     /* ---------------- v1.2.1：主页顶部全局搜索 ---------------- */
@@ -367,13 +398,17 @@ class HomeViewModel @Inject constructor(
             totalMemos = memo.total,
             locationCount = loc.total,
             recentMemos = memo.recent,
-            recentActs = acts.filter { it.kind in feedKinds },
+            // 自定义动态（kind=custom）始终展示，不受旧版筛选集合（可能不含 custom）影响
+            recentActs = acts.filter { it.kind in feedKinds || it.kind == "custom" }
+                .let { list -> if (feedLimit > 0) list.take(feedLimit) else list },
+            allActs = acts.filter { it.kind in feedKinds || it.kind == "custom" },
             // 自动事件 + 用户自定义里程碑合并按时间倒序；空集 = 显示全部类型
             timeline = (buildTimeline() + customTimeline)
                 .sortedWith(compareByDescending { it.time })
                 .take(TIMELINE_SHOW),
             customTimeline = customTimeline,
-            feedKinds = feedKinds
+            feedKinds = feedKinds,
+            feedLimit = feedLimit
         )
     }
 

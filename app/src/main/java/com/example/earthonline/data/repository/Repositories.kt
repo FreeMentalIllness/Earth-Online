@@ -130,4 +130,7 @@ class ActivityRepository @Inject constructor(private val dao: ActivityDao) {
         dao.insert(a)
         dao.trim()
     }
+
+    /** 删除单条动态（用户自定义动态的删除入口） */
+    suspend fun delete(id: String) = dao.delete(id)
 }

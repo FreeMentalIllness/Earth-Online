@@ -50,6 +50,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val CUSTOM_TIMELINE = stringPreferencesKey("custom_timeline_events")
         /** 主页「最近动态」显示类型筛选（JSON 集合：task/ach/item/memo，全空则显示全部） */
         val HOME_FEED_FILTER = stringPreferencesKey("home_feed_filter")
+        /** 主页「最近动态」首页显示条数（0 = 不限制，默认 3） */
+        val HOME_FEED_LIMIT = intPreferencesKey("home_feed_limit")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -104,7 +106,11 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     /** 主页动态流筛选（JSON 集合，空串 = 显示全部） */
     val homeFeedFilterJson: Flow<String> = ds.data.map { it[HOME_FEED_FILTER] ?: "" }
 
+    /** 主页「最近动态」显示条数（0 = 不限制） */
+    val homeFeedLimit: Flow<Int> = ds.data.map { it[HOME_FEED_LIMIT] ?: 3 }
+
     suspend fun setAchSound(v: Boolean) = ds.edit { it[ACH_SOUND] = v }
     suspend fun setCustomTimelineJson(v: String) = ds.edit { it[CUSTOM_TIMELINE] = v }
     suspend fun setHomeFeedFilterJson(v: String) = ds.edit { it[HOME_FEED_FILTER] = v }
+    suspend fun setHomeFeedLimit(v: Int) = ds.edit { it[HOME_FEED_LIMIT] = v.coerceIn(0, 200) }
 }

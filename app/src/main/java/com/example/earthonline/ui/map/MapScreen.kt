@@ -57,7 +57,10 @@ private const val MAP_ENABLED = true
  * 组合期状态写入；后续在协程 / 点击事件里读取即可，彻底规避「组合期写 State」导致的崩溃。
  */
 private class MapRef {
+    /** 地图视图；创建失败时为 null（failed = true） */
     var view: MapView? = null
+    /** MapView 原生组件是否初始化失败（普通字段，非 State，可安全在组合期写入） */
+    var failed: Boolean = false
     val aMap: AMap? get() = view?.map
 }
 
@@ -155,6 +158,30 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
         }
     }
 
+    // v1.0.2 深度修复：绑定 Activity 生命周期。
+    // ON_RESUME -> mapView.onResume()，ON_PAUSE -> mapView.onPause()，
+    // onDispose（离开页面/销毁）-> mapView.onDestroy()。三者缺一都可能崩溃或泄漏 GL 资源。
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            val mv = mapRef.view ?: return@LifecycleEventObserver
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> runCatching { mv.onResume() }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> runCatching { mv.onPause() }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapRef.view?.let { mv ->
+                runCatching { mv.onPause() }
+                runCatching { mv.onDestroy() }
+            }
+            mapRef.view = null
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -194,48 +221,49 @@ fun MapScreen(vm: MapViewModel, moreActions: MoreMenuActions) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
-                        // 隐私合规：必须在创建 MapView 之前同意隐私政策（否则新版 SDK 会抛异常）
+                        // 隐私合规：必须在创建 MapView 之前同意隐私政策（否则新版 SDK 会抛异常）。
+                        // Application.onCreate 已初始化过，这里再做一次幂等兜底。
                         runCatching { MapsInitializer.updatePrivacyAgree(ctx, true) }
                         runCatching { MapsInitializer.updatePrivacyShow(ctx, false, false) }
-                        val mv = try {
+                        // 创建 MapView；失败标记写入普通对象 MapRef（严禁在组合期写 Compose State！）
+                        val mv: MapView? = try {
                             MapView(ctx).apply { onCreate(null) }
                         } catch (e: Throwable) {
-                            mapFailed = true
-                            return@AndroidView android.widget.FrameLayout(ctx)
+                            mapRef.failed = true
+                            null
                         }
                         mapRef.view = mv
-                        runCatching { mv.map.uiSettings.isMyLocationButtonEnabled = false }
-                        runCatching {
-                            mv.map.setOnMapLongClickListener { latLng ->
-                                pendingLatLng = latLng
-                                showAdd = true
+                        mv?.let { m ->
+                            runCatching { m.map.uiSettings.isMyLocationButtonEnabled = false }
+                            runCatching {
+                                m.map.setOnMapLongClickListener { latLng ->
+                                    pendingLatLng = latLng
+                                    showAdd = true
+                                }
                             }
                         }
-                        // 关键修复（地图闪退根因）：onResume 必须在「视图真正 attach 到窗口」之后调用，
-                        // 此时 GL Surface 才就绪；在 factory 里直接 onResume 会因 surface 未就绪而崩溃。
-                        // 同时把 mapReady 状态放到 attach 回调里设置（非组合期，安全写入 State）。
-                        mv.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                            override fun onViewAttachedToWindow(v: View) {
-                                runCatching { mv.onResume() }
-                                mapReady = true
+                        // 实际展示的视图（成功=MapView，失败=空占位），二者必须是同一个实例
+                        val shown: View = mv ?: android.widget.FrameLayout(ctx)
+                        // mapReady / mapFailed 状态写入全部延迟到 attach 回调（非组合期，安全）
+                        shown.addOnAttachStateChangeListener(
+                            object : View.OnAttachStateChangeListener {
+                                override fun onViewAttachedToWindow(v: View) {
+                                    if (mapRef.failed) {
+                                        mapFailed = true
+                                    } else {
+                                        // attach 时 Activity 多半已处于 Resumed 态（ON_RESUME 不会再触发），
+                                        // 必须在这里补一次 onResume；后续 pause/resume 由生命周期观察者接管。
+                                        runCatching { mapRef.view?.onResume() }
+                                        mapReady = true
+                                    }
+                                }
+                                override fun onViewDetachedFromWindow(v: View) { /* onPause 由生命周期观察者处理 */ }
                             }
-                            override fun onViewDetachedFromWindow(v: View) {
-                                runCatching { mv.onPause() }
-                            }
-                        })
-                        mv
-                    },
-                    // 离开地图页 / 配置变更时按正确顺序释放，避免来回切换闪退。
-                    // 注：AndroidView 的 reified 类型被推断为 View（factory 失败分支返回 FrameLayout），
-                    // 故这里需向下转型为 MapView 再调用生命周期方法（失败分支转型为 null 会被跳过）。
-                    onRelease = { v ->
-                        (v as? MapView)?.let { mv ->
-                            runCatching { mv.onPause() }
-                            runCatching { mv.onDestroy() }
-                            if (mapRef.view === mv) mapRef.view = null
-                        }
-                        mapReady = false
+                        )
+                        shown
                     }
+                    // 生命周期（onPause/onDestroy）由上方 DisposableEffect 的
+                    // LifecycleEventObserver / onDispose 统一处理，此处不再重复释放。
                 )
             }
             if (mapFailed) {

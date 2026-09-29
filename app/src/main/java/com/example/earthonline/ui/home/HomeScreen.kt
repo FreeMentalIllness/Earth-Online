@@ -214,7 +214,9 @@ fun HomeScreen(
             ActsCard(
                 acts = state.recentActs,
                 feedKinds = state.feedKinds,
-                onFeedKindsChange = onFeedKindsChange
+                onFeedKindsChange = onFeedKindsChange,
+                totalCount = state.allActs.size,
+                onOpenAll = { onNavigate("all_activities") }
             )
         }
 
@@ -622,14 +624,17 @@ private fun HomeEntryTile(entry: HomeEntry, modifier: Modifier = Modifier, onCli
 
 /**
  * 最近动态：顶部增加显示类型筛选（任务 / 成就 / 物品 / 记录），用户可自定义显示内容。
- * 筛选状态由 HomeViewModel 经 DataStore 持久化。
+ * 右上角「全部」跳转完整动态列表页（AllActivitiesRoute）。
+ * 筛选与条数状态由 HomeViewModel 经 DataStore 持久化。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ActsCard(
     acts: List<ActivityEntity>,
     feedKinds: Set<String>,
-    onFeedKindsChange: (Set<String>) -> Unit
+    onFeedKindsChange: (Set<String>) -> Unit,
+    totalCount: Int = 0,
+    onOpenAll: () -> Unit = {}
 ) {
     val allKinds = listOf(
         "task" to "任务",
@@ -645,6 +650,11 @@ private fun ActsCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 SectionHeader("⚡ 最近动态")
+                if (totalCount > acts.size) {
+                    TextButton(onClick = onOpenAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("全部 $totalCount 条 ›", style = MaterialTheme.typography.labelMedium, color = AmberPrimary)
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 allKinds.forEach { (kind, label) ->
@@ -668,6 +678,7 @@ private fun ActsCard(
                         "ach" -> "🏆" to "解锁成就"
                         "task" -> "📋" to "完成任务"
                         "item" -> "🎒" to "获得物品"
+                        "custom" -> "⭐" to "自定义事件"
                         else -> "💭" to "记录"
                     }
                     Row(

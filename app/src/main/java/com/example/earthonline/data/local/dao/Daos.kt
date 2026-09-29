@@ -266,6 +266,10 @@ interface ActivityDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(a: ActivityEntity)
 
+    /** 删除单条动态（用户自定义动态的删除入口） */
+    @Query("DELETE FROM activities WHERE id = :id")
+    suspend fun delete(id: String)
+
     /** 裁剪：仅保留最近 50 条，超出部分删最旧 */
     @Query("DELETE FROM activities WHERE id NOT IN (SELECT id FROM activities ORDER BY time DESC LIMIT 50)")
     suspend fun trim()

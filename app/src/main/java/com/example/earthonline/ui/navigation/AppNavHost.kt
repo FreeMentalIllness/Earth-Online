@@ -19,6 +19,7 @@ import com.example.earthonline.ui.backpack.BackpackRoute
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.data.DataRoute
 import com.example.earthonline.ui.home.HomeRoute
+import com.example.earthonline.ui.home.AllActivitiesRoute
 import com.example.earthonline.ui.map.MapRoute
 import com.example.earthonline.ui.profile.ProfileRoute
 import com.example.earthonline.ui.report.ReportRoute
@@ -109,6 +110,13 @@ fun AppNavHost(
         // 阶段 3：个人资料页 + 高德足迹地图已落地
         composable(Screen.Profile.route) { ProfileRoute(moreActions = moreActions) }
         composable(Screen.Map.route) { MapRoute(moreActions = moreActions) }
+        // v1.0.2：全部动态列表页（主页「最近动态」右上角「全部」进入）
+        composable(Screen.AllActivities.route) {
+            AllActivitiesRoute(
+                onBack = { navController.popBackStack() },
+                moreActions = moreActions
+            )
+        }
         composable(Screen.Ai.route) { AiRoute(moreActions = moreActions) }
         composable(Screen.Settings.route) { SettingsRoute(moreActions = moreActions) }
         // v1.2.3：集中设置页拆出的二级页（独立路由，返回栈由 NavHost 维护）
