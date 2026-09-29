@@ -198,11 +198,11 @@ class HomeViewModel @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
-    /** 最近动态显示类型筛选（task/ach/item/memo），空集视作显示全部 */
+    /** 最近动态显示类型筛选（task/ach/item/memo），解码为空集时回落全类型，防止「全部隐藏」死局 */
     private val feedFilterFlow: Flow<Set<String>> = settingsDs.homeFeedFilterJson.map { txt ->
-        if (txt.isBlank()) setOf("task", "ach", "item", "memo")
+        if (txt.isBlank()) DEFAULT_FEED_KINDS
         else runCatching { json.decodeFromString(SetSerializer(String.serializer()), txt) }
-            .getOrDefault(setOf("task", "ach", "item", "memo"))
+            .getOrNull()?.takeIf { it.isNotEmpty() } ?: DEFAULT_FEED_KINDS
     }
 
     /** 最近动态首页显示条数（0 = 不限制；旧版本无该键默认 3，与原 ACT_LIMIT 一致） */
@@ -398,10 +398,11 @@ class HomeViewModel @Inject constructor(
             totalMemos = memo.total,
             locationCount = loc.total,
             recentMemos = memo.recent,
+            // allActs = 全量原始动态（不按类型过滤）—— ActsCard 的分类标签页需要覆盖筛选
+            allActs = acts,
             // 自定义动态（kind=custom）始终展示，不受旧版筛选集合（可能不含 custom）影响
             recentActs = acts.filter { it.kind in feedKinds || it.kind == "custom" }
                 .let { list -> if (feedLimit > 0) list.take(feedLimit) else list },
-            allActs = acts.filter { it.kind in feedKinds || it.kind == "custom" },
             // 自动事件 + 用户自定义里程碑合并按时间倒序；空集 = 显示全部类型
             timeline = (buildTimeline() + customTimeline)
                 .sortedWith(compareByDescending { it.time })
@@ -452,6 +453,8 @@ class HomeViewModel @Inject constructor(
             "paused" to "已暂停",
             "done" to "已完成"
         )
+        /** 最近动态可筛选的自动类型（custom 自定义动态恒显示，不参与勾选） */
+        val DEFAULT_FEED_KINDS = setOf("task", "ach", "item", "memo")
         const val MEMO_LIMIT = 5
         const val ACT_LIMIT = 3
         const val TIMELINE_LIMIT = 16

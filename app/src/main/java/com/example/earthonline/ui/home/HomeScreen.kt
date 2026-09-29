@@ -7,9 +7,11 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
@@ -75,6 +78,8 @@ fun HomeRoute(
         onAddTimelineEvent = vm::addCustomTimelineEvent,
         onDeleteTimelineEvent = vm::deleteCustomTimelineEvent,
         onFeedKindsChange = vm::setFeedKinds,
+        onFeedLimitChange = vm::setFeedLimit,
+        onAddCustomActivity = vm::addCustomActivity,
         query = query,
         results = results,
         onQueryChange = vm::setQuery,
@@ -96,6 +101,9 @@ fun HomeScreen(
     onAddTimelineEvent: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteTimelineEvent: (String) -> Unit = {},
     onFeedKindsChange: (Set<String>) -> Unit = {},
+    /** 最近动态：首页显示条数（0 = 不限）与自定义动态添加 */
+    onFeedLimitChange: (Int) -> Unit = {},
+    onAddCustomActivity: (String) -> Unit = {},
     /** v1.2.1 全局搜索：当前词 / 命中项 / 改词 / 点中结果 */
     query: String = "",
     results: List<SearchHit> = emptyList(),
@@ -212,10 +220,12 @@ fun HomeScreen(
 
         item(key = "acts", contentType = "card") {
             ActsCard(
-                acts = state.recentActs,
+                allActs = state.allActs,
                 feedKinds = state.feedKinds,
+                feedLimit = state.feedLimit,
                 onFeedKindsChange = onFeedKindsChange,
-                totalCount = state.allActs.size,
+                onFeedLimitChange = onFeedLimitChange,
+                onAddCustom = onAddCustomActivity,
                 onOpenAll = { onNavigate("all_activities") }
             )
         }
@@ -623,25 +633,52 @@ private fun HomeEntryTile(entry: HomeEntry, modifier: Modifier = Modifier, onCli
 }
 
 /**
- * 最近动态：顶部增加显示类型筛选（任务 / 成就 / 物品 / 记录），用户可自定义显示内容。
- * 右上角「全部」跳转完整动态列表页（AllActivitiesRoute）。
- * 筛选与条数状态由 HomeViewModel 经 DataStore 持久化。
+ * 最近动态：
+ * - 顶部单选分类标签（全部 / 任务 / 成就 / 物品 / 记录），默认「全部」；
+ *   「全部」按用户自定义的启用分类展示完整动态流（自定义动态恒显示）；
+ * - 右上角「自定义」按钮 → BottomSheet 配置面板：勾选展示分类 / 设置显示条数 / 添加自定义动态；
+ * - 底部「查看全部 N 条 ›」跳转完整动态列表页（AllActivitiesRoute）。
+ * 启用分类（feedKinds）与条数（feedLimit）由 HomeViewModel 经 DataStore 持久化；
+ * 标签选中态为轻量 UI 状态（默认「全部」，不持久化）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ActsCard(
-    acts: List<ActivityEntity>,
+    allActs: List<ActivityEntity>,
     feedKinds: Set<String>,
+    feedLimit: Int,
     onFeedKindsChange: (Set<String>) -> Unit,
-    totalCount: Int = 0,
+    onFeedLimitChange: (Int) -> Unit,
+    onAddCustom: (String) -> Unit,
     onOpenAll: () -> Unit = {}
 ) {
-    val allKinds = listOf(
+    val tabKinds = listOf(
+        "all" to "全部",
         "task" to "任务",
         "ach" to "成就",
         "item" to "物品",
         "memo" to "记录"
     )
+    val sheetKinds = listOf(
+        "task" to "任务",
+        "ach" to "成就",
+        "item" to "物品",
+        "memo" to "记录"
+    )
+
+    var tab by remember { mutableStateOf("all") }
+    var showConfig by remember { mutableStateOf(false) }
+    var showAdd by remember { mutableStateOf(false) }
+
+    // 筛选逻辑：具体标签 = 单独该类型（标签是显式意图，覆盖启用分类配置）；
+    // 「全部」= 按启用分类展示，自定义动态恒显示
+    val filtered = if (tab == "all") {
+        allActs.filter { it.kind in feedKinds || it.kind == "custom" }
+    } else {
+        allActs.filter { it.kind == tab }
+    }
+    val shown = if (feedLimit > 0) filtered.take(feedLimit) else filtered
+
     Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -650,30 +687,38 @@ private fun ActsCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 SectionHeader("⚡ 最近动态")
-                if (totalCount > acts.size) {
-                    TextButton(onClick = onOpenAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                        Text("全部 $totalCount 条 ›", style = MaterialTheme.typography.labelMedium, color = AmberPrimary)
-                    }
+                IconButton(onClick = { showConfig = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "自定义最近动态",
+                        tint = AmberPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                allKinds.forEach { (kind, label) ->
-                    val selected = kind in feedKinds
+
+            // 单选分类标签（5 枚，横向可滚动防溢出）
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            ) {
+                tabKinds.forEach { (kind, label) ->
                     FilterChip(
-                        selected = selected,
-                        onClick = {
-                            val next = if (selected) feedKinds - kind else feedKinds + kind
-                            onFeedKindsChange(next)
-                        },
+                        selected = tab == kind,
+                        onClick = { tab = kind },
                         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                         modifier = Modifier.height(30.dp)
                     )
                 }
             }
-            if (acts.isEmpty()) {
-                EmptyHint("暂无动态，去完成任务或解锁成就试试")
+
+            if (shown.isEmpty()) {
+                EmptyHint(
+                    if (tab == "all") "暂无动态，去完成任务或解锁成就试试"
+                    else "该分类下暂无动态"
+                )
             } else {
-                acts.forEach { act ->
+                shown.forEach { act ->
                     val (icon, verb) = when (act.kind) {
                         "ach" -> "🏆" to "解锁成就"
                         "task" -> "📋" to "完成任务"
@@ -698,9 +743,113 @@ private fun ActsCard(
                         )
                     }
                 }
+                if (filtered.size > shown.size) {
+                    TextButton(onClick = onOpenAll, modifier = Modifier.fillMaxWidth()) {
+                        Text("查看全部 ${filtered.size} 条动态 ›", color = AmberPrimary)
+                    }
+                }
             }
         }
     }
+
+    // 自定义配置面板（BottomSheet）：启用分类 / 显示条数 / 添加自定义动态 / 全部动态入口
+    if (showConfig) {
+        ModalBottomSheet(onDismissRequest = { showConfig = false }) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text("自定义最近动态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+                // 1) 启用分类（多选；自定义动态恒显示）
+                Text("要展示的分类", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    sheetKinds.forEach { (kind, label) ->
+                        val selected = kind in feedKinds
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                val next = if (selected) feedKinds - kind else feedKinds + kind
+                                // 至少保留一个分类，避免出现「全部隐藏」的死局面
+                                if (next.isNotEmpty()) onFeedKindsChange(next)
+                            },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+                Text(
+                    "「全部」标签只显示勾选的分类；⭐ 自定义动态始终显示。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // 2) 显示条数
+                Text("最多显示条数", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(5 to "5 条", 10 to "10 条", 20 to "20 条", 0 to "全部").forEach { (n, label) ->
+                        FilterChip(
+                            selected = feedLimit == n,
+                            onClick = { onFeedLimitChange(n) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                // 3) 添加自定义动态 + 完整列表入口
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = { showConfig = false; showAdd = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("添加自定义动态")
+                    }
+                    OutlinedButton(onClick = { showConfig = false; onOpenAll() }, modifier = Modifier.weight(1f)) {
+                        Text("查看全部动态 ›")
+                    }
+                }
+            }
+        }
+    }
+
+    // 添加自定义动态对话框
+    if (showAdd) {
+        AddCustomActivityDialog(
+            onDismiss = { showAdd = false },
+            onConfirm = { title ->
+                onAddCustom(title)
+                showAdd = false
+            }
+        )
+    }
+}
+
+/** 添加一条自定义动态（kind=custom，随动态流与时间轴展示） */
+@Composable
+private fun AddCustomActivityDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    AnimatedAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("⭐ 添加自定义动态") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    title, { title = it.take(60) },
+                    label = { Text("事件内容") },
+                    placeholder = { Text("例如：开始一段新旅程") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "自定义动态会显示在主页「最近动态」中（⭐ 标记），不受分类筛选影响。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(title.trim()) }, enabled = title.isNotBlank()) { Text("添加") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } }
+    )
 }
 
 /**
