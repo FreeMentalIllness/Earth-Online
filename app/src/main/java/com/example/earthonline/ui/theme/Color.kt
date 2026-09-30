@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 // 对应 HTML 暖白 Notion 风 + 克制毛玻璃（style.css 变量）
 // 主色：暖琥珀；背景：纸感米白；边框：浅卡其；文字：近黑暖灰
 val AmberPrimary = Color(0xFFD4A373)
-val AmberPrimaryDark = Color(0xFFB9885A)
+val AmberPrimaryDark = Color(0xFFE0A96D)
 val AmberContainer = Color(0xFFF0E2D2)
 
 val BackgroundLight = Color(0xFFF8F6F2)   // --bg #f8f6f2

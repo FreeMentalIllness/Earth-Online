@@ -17,17 +17,17 @@ import androidx.compose.ui.unit.dp
 */
 private val LightColorScheme = lightColorScheme(
     primary = AmberPrimary,
-    onPrimary = Color.White,
+    onPrimary = Color(0xFF241A10),
     primaryContainer = AmberContainer,
     onPrimaryContainer = TextPrimaryLight,
 
     secondary = AmberPrimary,
-    onSecondary = Color.White,
+    onSecondary = Color(0xFF241A10),
     secondaryContainer = AmberContainer,
     onSecondaryContainer = TextPrimaryLight,
 
     tertiary = AmberPrimary,
-    onTertiary = Color.White,
+    onTertiary = Color(0xFF241A10),
     tertiaryContainer = AmberContainer,
     onTertiaryContainer = TextPrimaryLight,
 
@@ -58,17 +58,17 @@ private val LightColorScheme = lightColorScheme(
 
 private val DarkColorScheme = darkColorScheme(
     primary = AmberPrimaryDark,
-    onPrimary = Color.White,
+    onPrimary = Color(0xFF241A10),
     primaryContainer = Color(0xFF3A2E22),
     onPrimaryContainer = Color(0xFFF0E2D2),
 
     secondary = AmberPrimaryDark,
-    onSecondary = Color.White,
+    onSecondary = Color(0xFF241A10),
     secondaryContainer = Color(0xFF3A2E22),
     onSecondaryContainer = Color(0xFFF0E2D2),
 
     tertiary = AmberPrimaryDark,
-    onTertiary = Color.White,
+    onTertiary = Color(0xFF241A10),
     tertiaryContainer = Color(0xFF3A2E22),
     onTertiaryContainer = Color(0xFFF0E2D2),
 
