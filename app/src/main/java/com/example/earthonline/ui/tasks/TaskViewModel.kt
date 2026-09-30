@@ -7,6 +7,8 @@ import com.example.earthonline.data.local.entity.ActivityEntity
 import com.example.earthonline.data.local.entity.TaskEntity
 import com.example.earthonline.data.repository.ActivityRepository
 import com.example.earthonline.data.repository.TaskRepository
+import com.example.earthonline.data.repository.XpEventRepository
+import com.example.earthonline.util.XpRules
 import com.example.earthonline.util.nowIso
 import com.example.earthonline.util.todayStr
 import com.example.earthonline.util.uid
@@ -25,7 +27,9 @@ import javax.inject.Inject
 class TaskViewModel @Inject constructor(
     private val repo: TaskRepository,
     private val activityRepo: ActivityRepository,
-    private val settings: SettingsDataStore
+    private val settings: SettingsDataStore,
+    // v1.0.4：XP 流水（勾选/撤销完成落一条 task 流水；XP 总量由主页对账派生）
+    private val xpRepo: XpEventRepository
 ) : ViewModel() {
 
     val tasks = repo.observeAll().stateIn(
@@ -93,6 +97,12 @@ class TaskViewModel @Inject constructor(
                     ActivityEntity(id = uid("act"), time = nowIso(), kind = "task", title = "完成了任务：${t.title}")
                 )
             }
+            // v1.0.4：XP 流水（带符号，撤销为负）
+            xpRepo.record(
+                kind = "task",
+                amount = if (willDone) XpRules.TASK_DONE else -XpRules.TASK_DONE,
+                reason = if (willDone) "完成任务：${t.title}" else "撤销完成：${t.title}"
+            )
         }
     }
 

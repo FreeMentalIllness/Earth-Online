@@ -69,8 +69,32 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
 }
 
 /**
+ * v5 -> v6：XP 持久化（v1.0.4）。
+ * ① profile 加 xp 列（累计经验，NOT NULL DEFAULT 0，可空旧行兼容由 DEFAULT 兜底）；
+ * ② 新建 xp_events 流水账表。xp_events.date 建索引 —— 索引名与实体 @Index 声明一致
+ *（Room schema 校验要求双向匹配，铁律：迁移里加索引必须实体同声明）。
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `profile` ADD COLUMN `xp` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `xp_events` (" +
+                "`id` TEXT NOT NULL, " +
+                "`kind` TEXT NOT NULL, " +
+                "`amount` INTEGER NOT NULL, " +
+                "`reason` TEXT NOT NULL, " +
+                "`createdAt` TEXT NOT NULL, " +
+                "`date` TEXT NOT NULL, " +
+                "PRIMARY KEY(`id`)" +
+                ")"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_xp_events_date` ON `xp_events` (`date`)")
+    }
+}
+
+/**
  * 主数据库（对应 HTML 的单一主存档键 `earth_data`，本端归一化为多表）。
- * version=5；迁移链 MIGRATION_1_2 / MIGRATION_2_3 / MIGRATION_3_4 / MIGRATION_4_5
+ * version=6；迁移链 MIGRATION_1_2 / MIGRATION_2_3 / MIGRATION_3_4 / MIGRATION_4_5 / MIGRATION_5_6
  *（fallbackToDestructiveMigration 仅作无匹配迁移时的兜底）。
  */
 @Database(
@@ -83,9 +107,10 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         CollectionEntity::class,
         LocationEntity::class,
         ActivityEntity::class,
-        BagCategoryEntity::class
+        BagCategoryEntity::class,
+        XpEventEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -99,6 +124,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
     abstract fun activityDao(): ActivityDao
     abstract fun bagCategoryDao(): BagCategoryDao
+    abstract fun xpEventDao(): XpEventDao
 
     companion object {
         private const val DB_NAME = "earth_online.db"
@@ -112,7 +138,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DB_NAME
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }

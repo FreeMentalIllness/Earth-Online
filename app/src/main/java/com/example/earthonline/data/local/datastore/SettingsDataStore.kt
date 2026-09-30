@@ -27,10 +27,17 @@ import javax.inject.Singleton
 @Singleton
 class SettingsDataStore @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val Context.dataStore by preferencesDataStore(name = "earth_settings")
     private val ds = context.dataStore
 
     companion object {
+        /**
+         * DataStore 委托必须放 companion（类级单例）而不是类体：
+         * BootReceiver 会手动 new SettingsDataStore(context)（绕过 Hilt），
+         * 委托在类体时每个实例各自持有一个 DataStore，同一文件双实例直接崩
+         *（IllegalStateException: multiple DataStores active for the same file）。
+         */
+        private val Context.dataStore by preferencesDataStore(name = "earth_settings")
+
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val THEME = stringPreferencesKey("earth_theme")
         val WALLPAPER = stringPreferencesKey("earth_wallpaper")
@@ -68,6 +75,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val QUICK_NOTIF = booleanPreferencesKey("quick_add_notif")
         /** 彩蛋计数器：查看「历年今日」卡片的次数 */
         val EGG_THROWBACK = intPreferencesKey("egg_throwback")
+        /** 已庆祝过的等级（= 周岁）；-1 = 从未记录（首次记录不庆祝，避免升级后首启误弹） */
+        val LAST_CELEBRATED_LEVEL = intPreferencesKey("last_celebrated_level")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -158,4 +167,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     suspend fun bumpEggThrowback() = ds.edit {
         it[EGG_THROWBACK] = ((it[EGG_THROWBACK] ?: 0) + 1).coerceAtMost(999999)
     }
+
+    /** 已庆祝过的等级（-1 = 从未记录） */
+    val lastCelebratedLevel: Flow<Int> = ds.data.map { it[LAST_CELEBRATED_LEVEL] ?: -1 }
+    suspend fun setLastCelebratedLevel(v: Int) = ds.edit { it[LAST_CELEBRATED_LEVEL] = v }
 }

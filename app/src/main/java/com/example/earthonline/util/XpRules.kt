@@ -17,6 +17,12 @@ object XpRules {
     const val ITEM = 3
     /** v1.0.3：记忆相册每导入一张照片 */
     const val PHOTO = 2
+    /**
+     * v1.0.4：主页时间轴自定义里程碑（kind=custom）。
+     * 注意：自定义里程碑只进 xp_events 流水，不计入 totalXp 派生口径
+     *（派生口径只认任务/成就/日志/足迹/物品/照片六类可枚举计数，无法从行数推导自定义事件）。
+     */
+    const val CUSTOM_MILESTONE = 15
 
     /**
      * 累计经验总值。所有端（App 内 / 小组件）共用这一个函数。

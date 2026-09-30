@@ -2,6 +2,9 @@ package com.example.earthonline.data.repository
 
 import com.example.earthonline.data.local.dao.*
 import com.example.earthonline.data.local.entity.*
+import com.example.earthonline.util.nowIso
+import com.example.earthonline.util.todayStr
+import com.example.earthonline.util.uid
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -135,4 +138,30 @@ class ActivityRepository @Inject constructor(private val dao: ActivityDao) {
 
     /** 删除单条动态（用户自定义动态的删除入口） */
     suspend fun delete(id: String) = dao.delete(id)
+}
+
+/**
+ * v1.0.4：XP 流水仓库 —— 每一笔经验进出落一条 xp_events。
+ * 纯审计流水：任务/成就的 XP 总量仍由 XpRules.totalXp 从可枚举计数派生，
+ * 自定义里程碑（kind=custom）则靠本表 SUM 累计（无法从行数推导）。
+ */
+@Singleton
+class XpEventRepository @Inject constructor(private val dao: XpEventDao) {
+    fun observeRecent(limit: Int = 50): Flow<List<XpEventEntity>> = dao.observeRecent(limit)
+
+    /** 自定义里程碑累计 XP（派生口径之外的增量部分，对账时叠加） */
+    suspend fun customXpSum(): Int = dao.sumByKind("custom")
+
+    suspend fun record(kind: String, amount: Int, reason: String) {
+        dao.insert(
+            XpEventEntity(
+                id = uid("xpe"),
+                kind = kind,
+                amount = amount,
+                reason = reason,
+                createdAt = nowIso(),
+                date = todayStr()
+            )
+        )
+    }
 }

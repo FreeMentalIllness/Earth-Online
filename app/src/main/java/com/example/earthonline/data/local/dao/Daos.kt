@@ -278,3 +278,18 @@ interface ActivityDao {
     @Query("DELETE FROM activities WHERE id NOT IN (SELECT id FROM activities ORDER BY time DESC LIMIT 50)")
     suspend fun trim()
 }
+
+@Dao
+interface XpEventDao {
+    @Query("SELECT * FROM xp_events ORDER BY createdAt DESC LIMIT :limit")
+    fun observeRecent(limit: Int): Flow<List<XpEventEntity>>
+
+    @Query("SELECT COUNT(*) FROM xp_events")
+    suspend fun count(): Int
+
+    @Query("SELECT COALESCE(SUM(amount), 0) FROM xp_events WHERE kind = :kind")
+    suspend fun sumByKind(kind: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(e: XpEventEntity)
+}

@@ -3,6 +3,7 @@ package com.example.earthonline.data.backup
 import android.content.Context
 import com.example.earthonline.data.local.dao.*
 import com.example.earthonline.data.local.entity.*
+import com.example.earthonline.data.repository.XpLedger
 import com.example.earthonline.util.ImageStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
@@ -28,6 +29,8 @@ class BackupRepository @Inject constructor(
     private val locationDao: LocationDao,
     private val activityDao: ActivityDao,
     private val json: Json,
+    // v1.0.4：导出前对账 profile.xp，保证导出的 XP 与派生口径一致
+    private val xpLedger: XpLedger,
     // v1.0.0：头像改成「私有目录里的原图文件」，备份要把图一起带走，需要读写私有目录
     @ApplicationContext private val appContext: Context
 ) {
@@ -46,6 +49,8 @@ class BackupRepository @Inject constructor(
     )
 
     suspend fun exportJson(): String {
+        // v1.0.4：先对账 XP（失败不阻塞导出，xp 列保持原值）
+        runCatching { xpLedger.reconcile() }
         val payload = Payload(
             exportedAt = LocalDateTime.now().toString(),
             profile = profileDao.get()?.let { withAvatarBytes(it) },

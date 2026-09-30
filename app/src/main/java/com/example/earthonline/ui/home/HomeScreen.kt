@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -45,6 +47,7 @@ import com.example.earthonline.data.local.entity.ActivityEntity
 import com.example.earthonline.util.millisToDayStr
 import com.example.earthonline.util.todayStr
 import com.example.earthonline.ui.components.AnimatedAlertDialog
+import com.example.earthonline.ui.components.ConfettiBurst
 import com.example.earthonline.ui.components.EmptyHint
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.SettingsIconButton
@@ -98,7 +101,8 @@ fun HomeRoute(
         onPickResult = { hit ->
             vm.clearQuery()
             onNavigate(hit.route)
-        }
+        },
+        onLevelCelebrated = vm::markLevelCelebrated
     )
 }
 
@@ -125,7 +129,9 @@ fun HomeScreen(
     query: String = "",
     results: List<SearchHit> = emptyList(),
     onQueryChange: (String) -> Unit = {},
-    onPickResult: (SearchHit) -> Unit = {}
+    onPickResult: (SearchHit) -> Unit = {},
+    /** v1.0.4：升级庆祝播完回调（落档已庆祝等级，防重复弹） */
+    onLevelCelebrated: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
     var memoInput by remember { mutableStateOf("") }
@@ -353,6 +359,84 @@ fun HomeScreen(
                         // 空集请求会被 ViewModel 忽略（至少保留一个），这里同步约束勾选态
                         if (next.isNotEmpty()) onQuickEntriesChange(next)
                     }
+                )
+            }
+        }
+
+        // v1.0.4：升级庆祝浮层 —— 等级（周岁）跨档时弹一次，播完落档
+        state.levelUp?.let { newLevel ->
+            LevelUpOverlay(
+                level = newLevel,
+                playerName = state.displayName,
+                onCelebrated = onLevelCelebrated
+            )
+        }
+    }
+}
+
+/**
+ * v1.0.4：升级庆祝浮层（纯 UI，不动 DB）。
+ * 全屏半透明遮罩 + 共享撒花 + Lv 徽章卡；点击任意处或 4 秒后自动收起。
+ */
+@Composable
+private fun LevelUpOverlay(
+    level: Int,
+    playerName: String,
+    onCelebrated: (Int) -> Unit
+) {
+    val dismissed = remember(level) { mutableStateOf(false) }
+    // 4 秒后自动收起；点击遮罩立即收起 —— 两者都走 onCelebrated 落档
+    LaunchedEffect(level) {
+        kotlinx.coroutines.delay(4000)
+        if (!dismissed.value) {
+            dismissed.value = true
+            onCelebrated(level)
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                if (!dismissed.value) {
+                    dismissed.value = true
+                    onCelebrated(level)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        ConfettiBurst(burstKey = "levelup-$level", combo = 1)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(24.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shadowElevation = 8.dp
+        ) {
+            Column(
+                Modifier.padding(horizontal = 36.dp, vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("🎉", style = MaterialTheme.typography.displayMedium)
+                Text(
+                    "Level Up!",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Lv.$level",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "$playerName 在地球Online又长大了一岁",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

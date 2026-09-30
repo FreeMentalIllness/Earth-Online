@@ -34,6 +34,7 @@ object DatabaseModule {
     @Provides fun provideLocationDao(db: AppDatabase) = db.locationDao()
     @Provides fun provideActivityDao(db: AppDatabase) = db.activityDao()
     @Provides fun provideBagCategoryDao(db: AppDatabase) = db.bagCategoryDao()
+    @Provides fun provideXpEventDao(db: AppDatabase) = db.xpEventDao()
 }
 
 /**

@@ -29,6 +29,12 @@ data class ProfileEntity(
     val province: String = "",
     val signature: String = "",
     val birthDate: String = "",          // YYYY-MM-DD，空串=未设置（等级=年龄由它计算）
+    /**
+     * v1.0.4：累计经验值持久化（DB 5->6 新增列，默认 0）。
+     * 单一事实源仍是 util/XpRules.totalXp 的派生口径 —— 本列由主页加载时对账校准，
+     * 保证导出 JSON 里的 xp 与报告页/小组件展示的 XP 永远一致；旧包导入缺省按 0。
+     */
+    val xp: Int = 0,
     val customFieldsJson: String = ""    // List<CustomField> 的 JSON
 ) {
     // ByteArray 默认 equals 用引用，Room 不受影响；这里覆盖以避免警告
@@ -39,7 +45,8 @@ data class ProfileEntity(
         return id == other.id && name == other.name && avatarKey == other.avatarKey &&
                 gender == other.gender && country == other.country && province == other.province &&
                 signature == other.signature && birthDate == other.birthDate &&
-                customFieldsJson == other.customFieldsJson && (avatarData.contentEquals(other.avatarData) == true)
+                customFieldsJson == other.customFieldsJson && xp == other.xp &&
+                (avatarData.contentEquals(other.avatarData) == true)
     }
 
     override fun hashCode(): Int {
@@ -52,10 +59,35 @@ data class ProfileEntity(
         result = 31 * result + province.hashCode()
         result = 31 * result + signature.hashCode()
         result = 31 * result + birthDate.hashCode()
+        result = 31 * result + xp
         result = 31 * result + customFieldsJson.hashCode()
         return result
     }
 }
+
+/**
+ * v1.0.4：经验值流水账（DB 5->6 新增表）。
+ * 每一笔 XP 进出（任务完成 / 成就解锁 / 自定义里程碑）落一行，amount 带符号（撤销为负）。
+ * 纯审计流水：展示口径仍以 XpRules.totalXp 派生值为准，本表不参与计算。
+ */
+@Serializable
+@Entity(
+    tableName = "xp_events",
+    indices = [Index("date")]   // 按日查流水（报告对齐）；索引名与 MIGRATION_5_6 建表语句一致
+)
+data class XpEventEntity(
+    @PrimaryKey val id: String,
+    /** task / ach / custom */
+    val kind: String,
+    /** 带符号增减量：+10 / -10 / +50 … */
+    val amount: Int,
+    /** 人类可读原因，如「完成任务：晨跑」 */
+    val reason: String,
+    /** ISO 时间戳 */
+    val createdAt: String,
+    /** 日键 YYYY-MM-DD（本地时区，与 activities 口径一致） */
+    val date: String
+)
 
 /** 任务（支持父子嵌套；对应 HTML state.tasks） */
 @Serializable

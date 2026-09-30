@@ -19,10 +19,13 @@ import com.example.earthonline.data.repository.LocationRepository
 import com.example.earthonline.data.repository.MemoRepository
 import com.example.earthonline.data.repository.ProfileRepository
 import com.example.earthonline.data.repository.TaskRepository
+import com.example.earthonline.data.repository.XpEventRepository
+import com.example.earthonline.data.repository.XpLedger
 import com.example.earthonline.data.local.datastore.SettingsDataStore
 import com.example.earthonline.util.Greeting
 import com.example.earthonline.util.GrowthStreak
 import com.example.earthonline.util.LifeStats
+import com.example.earthonline.util.XpRules
 import com.example.earthonline.util.lifeStatsOf
 import com.example.earthonline.util.localDayOf
 import com.example.earthonline.util.nowIso
@@ -144,7 +147,9 @@ data class HomeUiState(
     /** 主页佩戴的徽章（最多 3 枚，来自已解锁成就） */
     val badges: List<BadgeItem> = emptyList(),
     /** 全部已解锁成就（供「佩戴徽章」管理对话框选择） */
-    val badgePool: List<BadgeItem> = emptyList()
+    val badgePool: List<BadgeItem> = emptyList(),
+    /** v1.0.4：待庆祝的新等级（null = 无）；等级=周岁，由 DataStore 已庆祝档位推导 */
+    val levelUp: Int? = null
 ) {
     val doneRatio: Int get() = if (totalTasks > 0) Math.round(doneTasks * 100f / totalTasks) else 0
     /** v1.2.0：成就进度（概览卡第三行，四卡统一三行文案用） */
@@ -200,7 +205,9 @@ private data class Parts(
     /** v1.0.3：全量数据包（历年今日 / 今日一签 / 连续成长都要全量口径） */
     val bundle: Bundle = Bundle(),
     val customTitle: String = "",
-    val badgeIds: List<String> = emptyList()
+    val badgeIds: List<String> = emptyList(),
+    /** v1.0.4：已庆祝过的等级（-1 = 从未记录，首次记录不庆祝） */
+    val lastCelebrated: Int = -1
 )
 
 /** v1.0.3：回忆与成长计算所需的四份全量数据（都在现有 observeAll 流上，无新查询） */
@@ -226,8 +233,28 @@ class HomeViewModel @Inject constructor(
     private val locationRepo: LocationRepository,
     private val collectionRepo: CollectionRepository,
     private val settingsDs: SettingsDataStore,
-    private val json: Json
+    private val json: Json,
+    // v1.0.4：XP 对账与流水（主页加载即对账，导出前亦有二次对账兜底）
+    private val xpLedger: XpLedger,
+    private val xpRepo: XpEventRepository
 ) : ViewModel() {
+
+    init {
+        // v1.0.4：主页是启动首页，这里对账一次 profile.xp（派生口径 + 自定义里程碑累计）
+        viewModelScope.launch {
+            runCatching { xpLedger.reconcile() }
+            // 首录庆祝档位：-1（老用户升级上来）静默锁定当前年龄，
+            // 否则档位永远是 -1，之后年龄增长永远不会触发升级庆祝
+            runCatching {
+                val cur = settingsDs.lastCelebratedLevel.first()
+                if (cur < 0) {
+                    val age = profileRepo.get()?.birthDate
+                        ?.let { lifeStatsOf(it).age } ?: 0
+                    settingsDs.setLastCelebratedLevel(age)
+                }
+            }
+        }
+    }
 
     private val profileFlow = profileRepo.observe()
     private val taskFlow = combine(taskRepo.count(), taskRepo.doneCount()) { t, d -> TaskStat(t, d) }
@@ -282,6 +309,9 @@ class HomeViewModel @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
+    /** v1.0.4：已庆祝过的等级（-1 = 从未记录） */
+    private val lastCelebratedFlow: Flow<Int> = settingsDs.lastCelebratedLevel
+
     /** v1.0.3：全量数据包（回忆 / 成长计算口径） */
     private val bundleFlow: Flow<Bundle> = combine(
         memoRepo.observeAll(),
@@ -307,6 +337,7 @@ class HomeViewModel @Inject constructor(
             .combine(bundleFlow) { parts, bundle -> parts.copy(bundle = bundle) }
             .combine(customTitleFlow) { parts, title -> parts.copy(customTitle = title) }
             .combine(badgeIdsFlow) { parts, ids -> parts.copy(badgeIds = ids) }
+            .combine(lastCelebratedFlow) { parts, lv -> parts.copy(lastCelebrated = lv) }
             .map { it.toUi() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -335,6 +366,9 @@ class HomeViewModel @Inject constructor(
             settingsDs.setCustomTimelineJson(
                 json.encodeToString(ListSerializer(CustomTimelineEvent.serializer()), list)
             )
+            // v1.0.4：自定义里程碑记 XP 流水（kind=custom），并立即对账刷新 profile.xp
+            xpRepo.record("custom", XpRules.CUSTOM_MILESTONE, "自定义里程碑：${t.take(40)}")
+            runCatching { xpLedger.reconcile() }
         }
     }
 
@@ -475,6 +509,12 @@ class HomeViewModel @Inject constructor(
         // 连续成长：日键集合一次算好，当前连续与回归语共用
         val recordDays = recordDayKeys(bundle)
         val streakDays = GrowthStreak.currentStreak(recordDays)
+        val life = lifeStatsOf(profile?.birthDate)
+        // v1.0.4：升级庆祝判定 —— 等级（周岁）高于已庆祝档位时弹一次；
+        // lastCelebrated = -1（首次记录）静默落档，避免升级后首启误弹
+        val levelUp = if (life.hasBirth && lastCelebrated >= 0 && life.age > lastCelebrated) {
+            life.age
+        } else null
         return HomeUiState(
             loaded = true,
             name = profile?.name.orEmpty(),
@@ -488,7 +528,7 @@ class HomeViewModel @Inject constructor(
                 "${f.label}：${if (v.length > 20) v.take(20) + "…" else v}"
             },
             hiddenFieldCount = (fields.size - shown.size).coerceAtLeast(0),
-            life = lifeStatsOf(profile?.birthDate),
+            life = life,
             totalTasks = task.total,
             doneTasks = task.done,
             itemCount = item.total,
@@ -531,7 +571,8 @@ class HomeViewModel @Inject constructor(
             },
             badgePool = bundle.achievements.map {
                 BadgeItem(it.id, it.title.ifBlank { "成就" }, it.desc)
-            }
+            },
+            levelUp = levelUp
         )
     }
 
@@ -616,6 +657,17 @@ class HomeViewModel @Inject constructor(
     /** 主页翻开「历年今日」卡时计数（彩蛋「时光回声」判定源） */
     fun onThrowbackSeen() {
         viewModelScope.launch { settingsDs.bumpEggThrowback() }
+    }
+
+    /**
+     * v1.0.4：升级庆祝播完回调 —— 把当前等级落为已庆祝档位。
+     * 若传入等级已落后于实时等级（庆祝期间又跨级），取 max 防止连环弹。
+     */
+    fun markLevelCelebrated(level: Int) {
+        viewModelScope.launch {
+            val cur = settingsDs.lastCelebratedLevel.first()
+            settingsDs.setLastCelebratedLevel(maxOf(cur, level))
+        }
     }
 
     private fun parseFields(jsonText: String?): List<CustomField> {

@@ -7,6 +7,7 @@ import com.example.earthonline.data.local.entity.AchievementEntity
 import com.example.earthonline.data.local.entity.ActivityEntity
 import com.example.earthonline.data.local.entity.*
 import com.example.earthonline.data.repository.*
+import com.example.earthonline.util.XpRules
 import com.example.earthonline.util.lifeStatsOf
 import com.example.earthonline.util.localDayOf
 import com.example.earthonline.util.nowIso
@@ -42,7 +43,9 @@ class AchievementViewModel @Inject constructor(
     private val locationRepo: LocationRepository,
     private val activityRepo: ActivityRepository,
     private val profileRepo: ProfileRepository,
-    private val settings: SettingsDataStore
+    private val settings: SettingsDataStore,
+    // v1.0.4：XP 流水（解锁成就落一条 ach 流水）
+    private val xpRepo: XpEventRepository
 ) : ViewModel() {
 
     /** 成就行（引擎写入后由 Room 推回来） */
@@ -267,6 +270,8 @@ class AchievementViewModel @Inject constructor(
                         activityRepo.add(
                             ActivityEntity(id = uid("act"), time = nowIso(), kind = "ach", title = "解锁成就：${rule.title}")
                         )
+                        // v1.0.4：XP 流水（仅在「未解锁 -> 解锁」跳变时记一笔，回溯不改流水）
+                        xpRepo.record("ach", XpRules.ACHIEVEMENT, "解锁成就：${rule.title}")
                         if (!silent) _unlockEvents.tryEmit(unlockedRow)
                     }
                 } else if (et != null && existing.unlockedAt != et) {
@@ -306,6 +311,8 @@ class AchievementViewModel @Inject constructor(
                 activityRepo.add(
                     ActivityEntity(id = uid("act"), time = nowIso(), kind = "ach", title = "解锁成就：${ach.title}")
                 )
+                // v1.0.4：XP 流水（手动成就解锁也记一笔；撤销不回冲，保持流水单调）
+                xpRepo.record("ach", XpRules.ACHIEVEMENT, "解锁成就：${ach.title}")
             }
         }
     }
