@@ -25,8 +25,10 @@ android {
         // + 主页视觉统一（卡片圆角/入口Tile自适应/动态按钮高对比）+ 列表重组性能优化
         // versionCode 20 = v1.0.3 补丁：深色模式开屏补齐 windowBackground（根治冷启动白闪）
         // + 系统层启动图去掉图标（消除「地球」重影）。versionName 仍为 1.0.3，不跨端改动。
-        versionCode = 20
-        versionName = "1.0.3"
+        // versionCode 21 = v1.0.4：头像壁纸清晰度提升 + 物品收藏可编辑 + 隐藏已完成开关等六项迭代，
+        // + 深色强调色提亮与按钮前景对比度修复（三端设计规范 v1.0 收口）。
+        versionCode = 21
+        versionName = "1.0.4"
         vectorDrawables { useSupportLibrary = true }
         // 高德 SDK 需要原生 so 库，按需裁剪 ABI（阶段3 接入地图前可放行全部）
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
