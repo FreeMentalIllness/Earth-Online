@@ -39,7 +39,9 @@ class SettingsViewModel @Inject constructor(
     private val json: Json,
     private val cloudSync: CloudSyncManager,
     private val autoBackup: AutoBackupManager,
-    private val updateRepo: UpdateRepository
+    private val updateRepo: UpdateRepository,
+    // v1.0.5 清空数据：记忆相册原图文件清理
+    private val memoryPhotoStore: com.example.earthonline.data.photos.MemoryPhotoStore
 ) : ViewModel() {
 
     val theme: Flow<String> = settings.theme
@@ -106,6 +108,42 @@ class SettingsViewModel @Inject constructor(
 
     /** 从某份快照恢复（与导入备份同为「按主键合并」语义） */
     suspend fun restoreAutoSnapshot(s: AutoBackupManager.Snapshot): Boolean = autoBackup.restore(s)
+
+    /* ---------------- v1.0.5：清空数据 ---------------- */
+
+    /**
+     * 清空全部用户数据（语义与 Web 端 resetAllData 对齐），返回给 UI 的提示语。
+     *
+     * 执行顺序（每步都有明确理由）：
+     *  ① 先置防拉回标记 —— 本地清空期间绝不能被云端旧备份拉回（切前台/冷启动都会触发拉取）；
+     *  ② 勾选删云端时先 DELETE 远端备份（成败都不阻断本地清空，结果体现在返回语里）；
+     *  ③ 本地清空：DB 十表 + 头像原图文件 + 记忆相册图片文件 + DataStore 用户键 + 自动备份快照；
+     *  ④ 保留：主题 / 壁纸 / WebDAV / AI 配置 / 提醒与音效开关等应用设置键。
+     *
+     * @param deleteCloud 是否同时删除云端备份（确认框勾选项，默认不勾）
+     */
+    suspend fun clearAllData(deleteCloud: Boolean): String {
+        // ① 防拉回（下一次非手动拉取消费一次即失效）
+        settings.setSkipNextPull(true)
+        // ② 可选删云端
+        val cloudMsg = if (deleteCloud) {
+            val r = cloudSync.deleteRemote()
+            r.message
+        } else ""
+        // ③ 本地清空
+        backupRepo.clearAllData()
+        memoryPhotoStore.clearAllFiles()
+        settings.clearUserDataKeys()
+        autoBackup.clearSnapshots()
+        // 返回语：删云端结果 + 本地清空提示
+        return if (deleteCloud) "$cloudMsg；本地数据已清空" else "本地数据已清空"
+    }
+
+    /**
+     * v1.0.5 清空后的「重新同步」：把当前（清空后的）数据上传云端覆盖旧备份，
+     * 恢复多设备同步。直接复用 push(force=true) —— 与 Web 端 webdavUploadBackup 等价。
+     */
+    suspend fun resyncToCloud(): String = cloudSync.push(force = true).message
 
     /* ---------------- v1.2.1：应用内检查更新 ---------------- */
 

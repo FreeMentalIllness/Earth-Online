@@ -35,4 +35,8 @@ interface BagCategoryDao {
     /** 同作用域下是否已存在同名分类（重命名 / 新增时查重） */
     @Query("SELECT COUNT(*) FROM bag_categories WHERE scope = :scope AND name = :name AND id != :excludeId")
     suspend fun countSameName(scope: String, name: String, excludeId: String): Int
+
+    /** v1.0.5 清空数据：整表清空（自定义分类同属用户数据） */
+    @Query("DELETE FROM bag_categories")
+    suspend fun deleteAll()
 }

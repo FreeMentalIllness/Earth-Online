@@ -138,4 +138,18 @@ class AutoBackupManager @Inject constructor(
         Log.w(TAG, "自动备份恢复失败", it)
         false
     }
+
+    /**
+     * v1.0.5 清空数据：删除全部本地自动快照。
+     * 快照本身就是完整存档的副本 —— 用户数据都清了，快照不能留着（否则「清空」名不副实，
+     * 且下次 InvalidationTracker 触发的新快照还会与旧快照混在一起）。
+     * @return 删除的文件数
+     */
+    suspend fun clearSnapshots(): Int = writeMutex.withLock {
+        val all = dir().listFiles { f -> f.isFile && f.name.startsWith("auto-") && f.name.endsWith(".json") }
+            ?: return@withLock 0
+        var n = 0
+        all.forEach { f -> if (runCatching { f.delete() }.getOrDefault(false)) n++ }
+        n
+    }
 }

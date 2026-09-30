@@ -19,6 +19,10 @@ interface ProfileDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(p: ProfileEntity)
+
+    /** v1.0.5 清空数据：清空资料行（清空后由 BackupRepository 重建空种子行） */
+    @Query("DELETE FROM profile")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -85,6 +89,10 @@ interface TaskDao {
 
     @Query("DELETE FROM tasks WHERE parentId = :pid")
     suspend fun deleteChildren(pid: String)
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -115,6 +123,10 @@ interface MemoDao {
 
     @Query("DELETE FROM memos WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM memos")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -156,6 +168,10 @@ interface ItemDao {
 
     @Query("DELETE FROM items WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM items")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -198,6 +214,10 @@ interface AchievementDao {
 
     @Query("DELETE FROM achievements WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** v1.0.5 清空数据：整表清空（成就定义由引擎下次启动时重建，解锁记录全部丢失） */
+    @Query("DELETE FROM achievements")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -231,6 +251,10 @@ interface CollectionDao {
 
     @Query("DELETE FROM collections WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM collections")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -257,6 +281,10 @@ interface LocationDao {
 
     @Query("DELETE FROM locations WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM locations")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -277,6 +305,10 @@ interface ActivityDao {
     /** 裁剪：仅保留最近 50 条，超出部分删最旧 */
     @Query("DELETE FROM activities WHERE id NOT IN (SELECT id FROM activities ORDER BY time DESC LIMIT 50)")
     suspend fun trim()
+
+    /** v1.0.5 清空数据：整表清空 */
+    @Query("DELETE FROM activities")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -292,4 +324,8 @@ interface XpEventDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(e: XpEventEntity)
+
+    /** v1.0.5 清空数据：清空 XP 流水（profile.xp 一并由种子行归零） */
+    @Query("DELETE FROM xp_events")
+    suspend fun deleteAll()
 }

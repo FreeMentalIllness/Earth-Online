@@ -107,6 +107,19 @@ class MemoryPhotoStore @Inject constructor(
         save(list.filter { it.id != id })
     }
 
+    /**
+     * v1.0.5 清空数据：删除记忆相册全部原图文件。
+     * 元数据键（MEMORY_PHOTOS）由 SettingsDataStore.clearUserDataKeys 统一清，
+     * 这里只负责把 filesDir/photos 下的图片文件删干净，避免留孤儿文件占空间。
+     * @return 删除的文件数
+     */
+    suspend fun clearAllFiles(): Int = withContext(Dispatchers.IO) {
+        val dir = photosDir()
+        var n = 0
+        dir.listFiles()?.forEach { f -> if (f.isFile && runCatching { f.delete() }.getOrDefault(false)) n++ }
+        n
+    }
+
     /** 推断拍摄日期：EXIF 拍摄时间 > MediaStore DATE_TAKEN > 文件最后修改 > 今天 */
     private fun guessDay(uri: android.net.Uri, file: File): String {
         runCatching {

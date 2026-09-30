@@ -82,6 +82,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val LAST_CELEBRATED_LEVEL = intPreferencesKey("last_celebrated_level")
         /** v1.0.4：任务列表「隐藏已完成任务」开关（对齐 Web 端 v1.0.3 同名能力） */
         val HIDE_DONE_TASKS = booleanPreferencesKey("hide_done_tasks")
+        /** v1.0.5 清空数据防拉回：置位后下一次非手动自动拉取被跳过（消费一次即失效，对齐 Web skip_next_pull） */
+        val SKIP_NEXT_PULL = booleanPreferencesKey("skip_next_pull")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -174,4 +176,30 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     /** v1.0.4：任务列表「隐藏已完成任务」开关（默认关 = 显示全部） */
     val hideDoneTasks: Flow<Boolean> = ds.data.map { it[HIDE_DONE_TASKS] ?: false }
     suspend fun setHideDoneTasks(v: Boolean) = ds.edit { it[HIDE_DONE_TASKS] = v }
+
+    /* ————— v1.0.5 清空数据 ————— */
+
+    /** 防同步拉回标记（清空数据时置位；CloudSyncManager 冷启动拉取时消费一次） */
+    val skipNextPull: Flow<Boolean> = ds.data.map { it[SKIP_NEXT_PULL] ?: false }
+    suspend fun setSkipNextPull(v: Boolean) = ds.edit { it[SKIP_NEXT_PULL] = v }
+
+    /**
+     * 清空「用户数据键」，保留应用设置键。与 Web 端 resetAllData 的键语义对齐：
+     * - 清：自定义时间轴 / 动态流筛选与条数 / 速览入口 / 自定义称号 / 记忆相册元数据 /
+     *      佩戴徽章 / 彩蛋计数器 ×2 / 已庆祝等级；
+     * - 留：onboarding / 主题 / 壁纸（含不透明度与轮换开关）/ 提醒 / AI / WebDAV /
+     *      自动同步与上次同步时间 / 成就音效 / 常驻通知 / 隐藏已完成 / 字号占位。
+     */
+    suspend fun clearUserDataKeys() = ds.edit {
+        it.remove(CUSTOM_TIMELINE)
+        it.remove(HOME_FEED_FILTER)
+        it.remove(HOME_FEED_LIMIT)
+        it.remove(HOME_QUICK_ENTRIES)
+        it.remove(CUSTOM_TITLE)
+        it.remove(MEMORY_PHOTOS)
+        it.remove(HOME_BADGES)
+        it.remove(EGG_BLANK_TITLE)
+        it.remove(EGG_THROWBACK)
+        it.remove(LAST_CELEBRATED_LEVEL)
+    }
 }

@@ -44,6 +44,7 @@ import com.example.earthonline.ui.components.AnimatedAlertDialog
 import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.CropShape
 import com.example.earthonline.ui.components.ImageCropperDialog
+import com.example.earthonline.ui.navigation.Screen
 import android.app.DownloadManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -372,6 +373,10 @@ fun BackupSyncRoute(
     var davTesting by remember { mutableStateOf(false) }
     var davSyncing by remember { mutableStateOf(false) }
     var davPulling by remember { mutableStateOf(false) }
+    // v1.0.5：清空数据确认框与「同时删除云端备份」勾选态（默认不勾）
+    var showClearData by remember { mutableStateOf(false) }
+    var clearDelCloud by remember { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
 
     val autoSync by vm.autoSync.collectAsStateWithLifecycle(initialValue = true)
     val lastSyncAt by vm.lastSyncAt.collectAsStateWithLifecycle(initialValue = "")
@@ -436,6 +441,60 @@ fun BackupSyncRoute(
                 }
             },
             confirmButton = { TextButton(onClick = { showPrivacy = false }) { Text("我已阅读") } }
+        )
+    }
+    // v1.0.5：清空数据 —— 醒目二次确认（红色警示 + 勾选删云端，默认不勾）
+    if (showClearData) {
+        AnimatedAlertDialog(
+            onDismissRequest = { if (!clearing) showClearData = false },
+            title = { Text("确认清空数据", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "将清空本机全部用户数据（任务、日志、物品、成就、收藏、足迹、个人资料等），并恢复为全新种子数据。此操作无法撤销，建议先「导出备份」。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        "主题、壁纸、WebDAV 与 AI 配置等应用设置会保留；清空后会暂停一次启动时的云端自动拉取，防止旧备份被同步回来。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = clearDelCloud,
+                            onCheckedChange = { clearDelCloud = it },
+                            enabled = !clearing
+                        )
+                        Text(
+                            "同时删除云端备份（默认不勾）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !clearing,
+                    onClick = {
+                        clearing = true
+                        scope.launch {
+                            val msg = vm.clearAllData(clearDelCloud)
+                            clearing = false
+                            showClearData = false
+                            snackbar.showSnackbar(msg)
+                            // 与 Web 端一致：清空后回主页（数据归零 + 空态引导）
+                            if (!navController.popBackStack(Screen.Home.route, false)) {
+                                navController.navigate(Screen.Home.route) { launchSingleTop = true }
+                            }
+                        }
+                    }
+                ) { Text("确认清空", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(enabled = !clearing, onClick = { showClearData = false }) { Text("取消") }
+            }
         )
     }
 
@@ -592,6 +651,46 @@ fun BackupSyncRoute(
                     }
                     Text(
                         "导入采用按主键合并：同一条数据以备份为准，本地新增的部分保留（与网页端一致）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            // v1.0.5：危险区 —— 清空数据（醒目确认 + 可选删云端 + 防同步拉回，与 Web/Windows 三端一致）
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                )
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "危险区",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        "清空本机全部用户数据并恢复为全新种子数据。主题、壁纸、WebDAV 与 AI 配置等应用设置会保留。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = { showClearData = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("🗑️ 清空数据", color = MaterialTheme.colorScheme.error) }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val msg = vm.resyncToCloud()
+                                snackbar.showSnackbar(msg)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("☁️ 重新同步（上传当前数据到云端）") }
+                    Text(
+                        "「重新同步」会把当前（清空后的）数据上传云端覆盖旧备份，用于恢复多设备同步。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

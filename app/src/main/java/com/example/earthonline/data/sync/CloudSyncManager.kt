@@ -74,6 +74,13 @@ class CloudSyncManager @Inject constructor(
      */
     suspend fun pullIfRemoteNewer(force: Boolean = false): SyncResult = withContext(Dispatchers.IO) {
         mutex.withLock {
+            // v1.0.5 清空数据防拉回：非手动（冷启动/回前台）时消费跳过标记，
+            // 命中则本次不拉取 —— 防止云端旧备份把刚清空的本地数据整包拉回来。
+            // 手动「从云端恢复」走 force=true，不受影响。
+            if (!force && settings.skipNextPull.first()) {
+                settings.setSkipNextPull(false)
+                return@withLock SyncResult(false, "已跳过本次自动拉取（清空数据保护）")
+            }
             val cfg = readConfig()
                 ?: return@withLock SyncResult(false, "未配置 WebDAV")
             if (!force && !settings.autoSync.first()) {
@@ -115,6 +122,27 @@ class CloudSyncManager @Inject constructor(
                 .getOrElse { return@withLock SyncResult(false, "上传失败：${it.message}") }
             settings.setLastSyncAt(at)
             SyncResult(true, "已推送到云端", changed = true)
+        }
+    }
+
+    /**
+     * v1.0.5 清空数据：删除云端备份文件（HTTP DELETE）。
+     * 404 视为成功（云端本来就没有备份，目标已达成）—— OkHttp 对 404 抛的是
+     * friendlyError，这里按 message 含「404」宽松放行，其余失败原样返回。
+     */
+    suspend fun deleteRemote(): SyncResult = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val cfg = readConfig()
+                ?: return@withLock SyncResult(false, "未配置 WebDAV，云端无备份")
+            val r = webDav.delete(davOf(cfg), remotePathOf(cfg))
+            r.fold(
+                onSuccess = { SyncResult(true, "云端备份已删除") },
+                onFailure = {
+                    val msg = it.message.orEmpty()
+                    if (msg.contains("404")) SyncResult(true, "云端备份已删除")
+                    else SyncResult(false, "云端删除失败：$msg")
+                }
+            )
         }
     }
 

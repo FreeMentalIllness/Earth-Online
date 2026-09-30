@@ -32,7 +32,10 @@ class BackupRepository @Inject constructor(
     // v1.0.4：导出前对账 profile.xp，保证导出的 XP 与派生口径一致
     private val xpLedger: XpLedger,
     // v1.0.0：头像改成「私有目录里的原图文件」，备份要把图一起带走，需要读写私有目录
-    @ApplicationContext private val appContext: Context
+    @ApplicationContext private val appContext: Context,
+    // v1.0.5 清空数据：背包分类与 XP 流水两表也要清
+    private val bagCategoryDao: BagCategoryDao,
+    private val xpEventDao: XpEventDao
 ) {
     @Serializable
     data class Payload(
@@ -75,6 +78,37 @@ class BackupRepository @Inject constructor(
         p.collections.forEach { collectionDao.insert(it) }
         p.locations.forEach { locationDao.insert(it) }
         p.activities.forEach { activityDao.insert(it) }
+    }
+
+    /**
+     * v1.0.5「清空数据」：清空全部用户数据并恢复空种子，语义与 Web 端 resetAllData 对齐。
+     *
+     * 清空范围：十张表全部（profile/tasks/memos/items/achievements/collections/
+     * locations/activities/bag_categories/xp_events）+ 头像原图文件。
+     * 保留范围：DataStore 里的应用设置（主题/壁纸/WebDAV/AI 配置等，由调用方处理）
+     * 与本地自动备份快照文件（由调用方决定是否一并清理）。
+     *
+     * 注意顺序：先删头像文件再清 profile 行，否则 avatarPath 随行丢失、文件成孤儿。
+     */
+    suspend fun clearAllData() {
+        // 1. 头像原图文件（先取路径，再清行）
+        profileDao.get()?.avatarPath?.takeIf { it.isNotBlank() }?.let { path ->
+            runCatching { ImageStore.deleteFile(path) }
+        }
+        // 2. 十表整表清空
+        taskDao.deleteAll()
+        memoDao.deleteAll()
+        itemDao.deleteAll()
+        achievementDao.deleteAll()
+        collectionDao.deleteAll()
+        locationDao.deleteAll()
+        activityDao.deleteAll()
+        bagCategoryDao.deleteAll()
+        xpEventDao.deleteAll()
+        profileDao.deleteAll()
+        // 3. 重建空种子资料行（全部默认值：name 空 / birthDate 空 / xp 0），
+        //    避免「行缺失 = 未初始化」语义触发引导页（onboarding_done 已为 true，不会重进引导）
+        profileDao.upsert(ProfileEntity())
     }
 
     /**
