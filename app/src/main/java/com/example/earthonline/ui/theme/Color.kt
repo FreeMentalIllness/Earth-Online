@@ -26,3 +26,30 @@ val BorderDark = Color(0xFF3F3F46)
 val TextPrimaryDark = Color(0xFFF2F2F5)
 val TextSecondaryDark = Color(0xFFB6B6BF)
 val TextTertiaryDark = Color(0xFF8F8F99)
+
+/* ————— v1.0.4 设计系统：语义色浅/深双档（一次到位） —————
+   规则：浅色主题取「深色值」（白底上 ≥4.5:1），深色主题取「浅色值」（#232326 底上 ≥4.5:1）。
+   所有强调组件（按钮/图标/角标）的语义色一律从这两档取，禁止散落硬编码。 */
+
+/** 琥珀底上的文字/图标前景（浅深主题一致，深棕保证对比度，对齐 Web 端按钮 fg #241A10） */
+val OnAmber = Color(0xFF241A10)
+
+/** 深色主题的琥珀容器（原 Theme.kt 内联值 0xFF3A2E22 提升为命名 token） */
+val AmberContainerDark = Color(0xFF3A2E22)
+val OnAmberContainerDark = Color(0xFFF0E2D2)
+
+/** 成功（完成/达成） */
+val SuccessLight = Color(0xFF588157)
+val SuccessDark = Color(0xFFA3C4A3)
+
+/** 危险（删除/错误/超期） */
+val DangerLight = Color(0xFFBC4749)
+val DangerDark = Color(0xFFE59A9B)
+
+/** 警告（到期提醒/暂停） */
+val WarningLight = Color(0xFF9A6B1F)
+val WarningDark = Color(0xFFE6C079)
+
+/** 信息（链接/提示） */
+val InfoLight = Color(0xFF457B9D)
+val InfoDark = Color(0xFF9CC3DB)

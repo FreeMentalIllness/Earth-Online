@@ -17,19 +17,25 @@ import androidx.compose.ui.unit.dp
 */
 private val LightColorScheme = lightColorScheme(
     primary = AmberPrimary,
-    onPrimary = Color(0xFF241A10),
+    onPrimary = OnAmber,
     primaryContainer = AmberContainer,
     onPrimaryContainer = TextPrimaryLight,
 
     secondary = AmberPrimary,
-    onSecondary = Color(0xFF241A10),
+    onSecondary = OnAmber,
     secondaryContainer = AmberContainer,
     onSecondaryContainer = TextPrimaryLight,
 
     tertiary = AmberPrimary,
-    onTertiary = Color(0xFF241A10),
+    onTertiary = OnAmber,
     tertiaryContainer = AmberContainer,
     onTertiaryContainer = TextPrimaryLight,
+
+    // v1.0.4：语义错误色接入设计系统（DangerLight，白底 ≥4.5:1）
+    error = DangerLight,
+    onError = Color.White,
+    errorContainer = Color(0xFFF5DFDD),
+    onErrorContainer = TextPrimaryLight,
 
     background = BackgroundLight,
     onBackground = TextPrimaryLight,
@@ -58,19 +64,25 @@ private val LightColorScheme = lightColorScheme(
 
 private val DarkColorScheme = darkColorScheme(
     primary = AmberPrimaryDark,
-    onPrimary = Color(0xFF241A10),
-    primaryContainer = Color(0xFF3A2E22),
-    onPrimaryContainer = Color(0xFFF0E2D2),
+    onPrimary = OnAmber,
+    primaryContainer = AmberContainerDark,
+    onPrimaryContainer = OnAmberContainerDark,
 
     secondary = AmberPrimaryDark,
-    onSecondary = Color(0xFF241A10),
-    secondaryContainer = Color(0xFF3A2E22),
-    onSecondaryContainer = Color(0xFFF0E2D2),
+    onSecondary = OnAmber,
+    secondaryContainer = AmberContainerDark,
+    onSecondaryContainer = OnAmberContainerDark,
 
     tertiary = AmberPrimaryDark,
-    onTertiary = Color(0xFF241A10),
-    tertiaryContainer = Color(0xFF3A2E22),
-    onTertiaryContainer = Color(0xFFF0E2D2),
+    onTertiary = OnAmber,
+    tertiaryContainer = AmberContainerDark,
+    onTertiaryContainer = OnAmberContainerDark,
+
+    // v1.0.4：语义错误色接入设计系统（DangerDark，#232326 底 ≥4.5:1）
+    error = DangerDark,
+    onError = Color(0xFF3B1717),
+    errorContainer = Color(0xFF4A2624),
+    onErrorContainer = Color(0xFFF5DFDD),
 
     background = BackgroundDark,
     onBackground = TextPrimaryDark,

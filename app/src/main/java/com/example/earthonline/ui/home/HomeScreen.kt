@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,12 +53,15 @@ import com.example.earthonline.ui.components.TagChip
 import com.example.earthonline.ui.components.UiDimens
 import com.example.earthonline.ui.components.UserAvatar
 import com.example.earthonline.ui.theme.AmberPrimary
+import com.example.earthonline.ui.theme.OnAmber
 
 /** 主页 LazyColumn 中「人生时间轴」卡片的位置（0 基），供卡片内的「添加里程碑」定位 */
 
 /** 首页入口定义（对应 HTML renderHome 顶部功能入口）。
- *  仅保留：任务 / 背包 / 成就 / 地图 / 记账 / 系统，去除与下方卡片重复的「新建任务」「记心情」等入口。 */
+ *  仅保留：任务 / 背包 / 成就 / 地图 / 记账 / 系统，去除与下方卡片重复的「新建任务」「记心情」等入口。
+ *  [id] 与 HomeViewModel.DEFAULT_QUICK_ENTRIES 对应，供「自定义速览入口」按 DataStore 开关显隐。 */
 private data class HomeEntry(
+    val id: String,
     val icon: String,
     val label: String,
     val sub: String,
@@ -84,6 +88,7 @@ fun HomeRoute(
         onDeleteTimelineEvent = vm::deleteCustomTimelineEvent,
         onFeedKindsChange = vm::setFeedKinds,
         onFeedLimitChange = vm::setFeedLimit,
+        onQuickEntriesChange = vm::setQuickEntries,
         onAddCustomActivity = vm::addCustomActivity,
         onThrowbackSeen = vm::onThrowbackSeen,
         onToggleBadge = vm::toggleBadge,
@@ -110,6 +115,8 @@ fun HomeScreen(
     onFeedKindsChange: (Set<String>) -> Unit = {},
     /** 最近动态：首页显示条数（0 = 不限）与自定义动态添加 */
     onFeedLimitChange: (Int) -> Unit = {},
+    /** 主页速览自定义入口（DataStore 持久化，至少保留一个） */
+    onQuickEntriesChange: (Set<String>) -> Unit = {},
     onAddCustomActivity: (String) -> Unit = {},
     /** v1.0.3：翻开「历年今日」卡（彩蛋计数） / 佩戴徽章切换 */
     onThrowbackSeen: () -> Unit = {},
@@ -135,6 +142,8 @@ fun HomeScreen(
     }
 
     var showAddTimeline by remember { mutableStateOf(false) }
+    // 主页速览「自定义入口」配置面板（BottomSheet）
+    var showQuickEdit by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
@@ -191,7 +200,12 @@ fun HomeScreen(
         }
 
         item(key = "overview", contentType = "overview") {
-            OverviewGrid(state = state, onNavigate = onNavigate, onAccounting = moreActions.onAccounting)
+            OverviewGrid(
+                state = state,
+                onNavigate = onNavigate,
+                onAccounting = moreActions.onAccounting,
+                onEditEntries = { showQuickEdit = true }
+            )
         }
 
         item(key = "worldlog", contentType = "card") {
@@ -327,6 +341,20 @@ fun HomeScreen(
                     showAddTimeline = false
                 }
             )
+        }
+
+        // 主页速览：自定义显示哪些入口（DataStore 持久化，至少保留一个）
+        if (showQuickEdit) {
+            ModalBottomSheet(onDismissRequest = { showQuickEdit = false }) {
+                QuickEntriesSheet(
+                    enabled = state.quickEntries,
+                    onToggle = { id, checked ->
+                        val next = if (checked) state.quickEntries + id else state.quickEntries - id
+                        // 空集请求会被 ViewModel 忽略（至少保留一个），这里同步约束勾选态
+                        if (next.isNotEmpty()) onQuickEntriesChange(next)
+                    }
+                )
+            }
         }
     }
 }
@@ -661,18 +689,43 @@ private fun AvatarWithBadge(
 private fun OverviewGrid(
     state: HomeUiState,
     onNavigate: (String) -> Unit,
-    onAccounting: () -> Unit
+    onAccounting: () -> Unit,
+    onEditEntries: () -> Unit = {}
 ) {
-    val entries = listOf(
-        HomeEntry("📋", "任务", "完成率 ${state.doneRatio}%", "tasks"),
-        HomeEntry("🎒", "背包", "${state.itemCount} 件物品", "backpack"),
-        HomeEntry("🏆", "成就", "${state.unlockedAch}/${state.totalAch}", "achievements"),
-        HomeEntry("🗺️", "地图", "${state.locationCount} 处足迹", "map"),
-        HomeEntry("📊", "记账", "账本与导出", null),
-        HomeEntry("🤖", "系统", "AI 助手", "ai")
+    val allEntries = listOf(
+        HomeEntry("tasks", "📋", "任务", "完成率 ${state.doneRatio}%", "tasks"),
+        HomeEntry("backpack", "🎒", "背包", "${state.itemCount} 件物品", "backpack"),
+        HomeEntry("achievements", "🏆", "成就", "${state.unlockedAch}/${state.totalAch}", "achievements"),
+        HomeEntry("map", "🗺️", "地图", "${state.locationCount} 处足迹", "map"),
+        HomeEntry("accounting", "📊", "记账", "账本与导出", null),
+        HomeEntry("ai", "🤖", "系统", "AI 助手", "ai")
     )
+    // 用户自定义显隐（DataStore）；异常空集时回落全部，防止入口全灭
+    val entries = allEntries.filter { it.id in state.quickEntries }
+        .ifEmpty { allEntries }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        entries.chunked(3).forEach { rowEntries ->
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // weight 让标题占据剩余宽度：大字号下标题换行也不会把右侧按钮挤出屏幕
+            SectionHeader("🧭 速览", Modifier.weight(1f))
+            // 带文字的入口按钮：比纯图标更易发现、易点中（与「最近动态」的自定义入口同一规范）
+            TextButton(
+                onClick = onEditEntries,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                Text("自定义", style = MaterialTheme.typography.labelMedium, color = AmberPrimary)
+            }
+        }
+
+        // 响应式列数：系统/应用大字号（fontScale ≥ 1.3）时降到 2 列，
+        // 避免 3 列挤压导致「完成率 xx%」「x/x」等副标题被截断
+        val cols = if (LocalDensity.current.fontScale >= 1.3f) 2 else 3
+        entries.chunked(cols).forEach { rowEntries ->
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -685,8 +738,46 @@ private fun OverviewGrid(
                         if (entry.route != null) onNavigate(entry.route) else onAccounting()
                     }
                 }
-                // 末行不足 3 个时用空白占位，保持左右对齐
-                repeat(3 - rowEntries.size) { Spacer(Modifier.weight(1f)) }
+                // 末行不足一整行时用空白占位，保持左右对齐
+                repeat(cols - rowEntries.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** 速览自定义入口的配置面板（BottomSheet 内容）：勾选显示 / 隐藏，至少保留一个 */
+@Composable
+private fun QuickEntriesSheet(enabled: Set<String>, onToggle: (String, Boolean) -> Unit) {
+    // 与 OverviewGrid 的 allEntries 保持同一份清单（含隐藏项，才能重新勾回来）
+    val quickAll = listOf(
+        Triple("tasks", "📋", "任务"),
+        Triple("backpack", "🎒", "背包"),
+        Triple("achievements", "🏆", "成就"),
+        Triple("map", "🗺️", "地图"),
+        Triple("accounting", "📊", "记账"),
+        Triple("ai", "🤖", "系统")
+    )
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("自定义速览入口", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "勾选要显示在主页顶部的入口（至少保留一个），设置立即生效并自动保存。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        quickAll.forEach { (id, icon, label) ->
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Checkbox(
+                    checked = id in enabled,
+                    onCheckedChange = { onToggle(id, it) }
+                )
+                Text("$icon $label", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -700,7 +791,7 @@ private fun HomeEntryTile(entry: HomeEntry, modifier: Modifier = Modifier, onCli
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(UiDimens.ItemRadius),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = modifier.height(76.dp)
+        modifier = modifier.heightIn(min = 76.dp)
     ) {
         Column(
             Modifier.fillMaxSize().padding(10.dp),
@@ -708,7 +799,13 @@ private fun HomeEntryTile(entry: HomeEntry, modifier: Modifier = Modifier, onCli
             horizontalAlignment = Alignment.Start
         ) {
             Text(entry.icon, style = MaterialTheme.typography.titleMedium)
-            Text(entry.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                entry.label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(
                 entry.sub,
                 style = MaterialTheme.typography.labelSmall,
@@ -796,21 +893,33 @@ private fun ActsCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                SectionHeader("⚡ 最近动态")
-                // 对比度修复：原透明 IconButton 的琥珀图标与米白卡片几乎同色、无法辨认，
-                // 改为暖棕实心圆角按钮 + 白色图标（主题对比色，深浅色模式都清晰可辨）。
+                // weight 占满剩余宽度：大字号下标题换行也不会把右侧入口挤出屏幕
+                SectionHeader("⚡ 最近动态", Modifier.weight(1f))
+                // 可见性修复（第二轮）：纯图标 32dp 方块在琥珀底上仍不够醒目，
+                // 改为「图标 + 文字」实心按钮，前景用 OnAmber（深棕），
+                // 浅深主题对琥珀底都有 ≥4.5:1 对比度，且文字入口更易发现、易点中。
                 Surface(
                     onClick = { showConfig = true },
                     color = AmberPrimary,
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.heightIn(min = 32.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Icon(
                             Icons.Filled.Settings,
-                            contentDescription = "自定义最近动态",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = null,
+                            tint = OnAmber,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            "自定义",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = OnAmber,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -1098,13 +1207,10 @@ private fun TimelineCard(
     onAdd: () -> Unit,
     onDelete: (String) -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(UiDimens.CardRadius),
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
+    // 与主页其他卡片（LifeCard / ActsCard / 世界日志等）完全同构：
+    // 默认 Card + UiDimens.CardRadius 圆角 + 默认容器色（surfaceContainerLow），
+    // 不再单独覆盖 containerColor，保证浅深主题下颜色、圆角与邻卡零偏差。
+    Card(shape = RoundedCornerShape(UiDimens.CardRadius), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(UiDimens.CardPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 Modifier.fillMaxWidth(),

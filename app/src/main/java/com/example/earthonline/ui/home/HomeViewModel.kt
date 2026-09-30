@@ -124,6 +124,8 @@ data class HomeUiState(
     val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
     /** 最近动态首页显示条数（0 = 不限制） */
     val feedLimit: Int = 3,
+    /** 主页速览显示的入口 id 集合（DataStore 持久化，全部 6 个为默认） */
+    val quickEntries: Set<String> = DEFAULT_QUICK_ENTRIES,
     // ————— v1.0.3 情绪价值与成长 —————
     /** 动态问候语（时间段 + 最近心情 + 连续天数） */
     val greeting: String = "",
@@ -177,6 +179,9 @@ private data class AchStat(val unlocked: Int, val total: Int, val recent: List<A
 private data class ItemStat(val total: Int, val categories: Int)
 private data class LocStat(val total: Int, val recent: List<LocationEntity>)
 
+/** 主页速览全部入口 id（与 HomeScreen 的 HomeEntry 一一对应；DataStore 空值回落全集） */
+internal val DEFAULT_QUICK_ENTRIES = setOf("tasks", "backpack", "achievements", "map", "accounting", "ai")
+
 private data class Parts(
     val profile: ProfileEntity?,
     val task: TaskStat,
@@ -190,6 +195,8 @@ private data class Parts(
     val customTimeline: List<TimelineItem> = emptyList(),
     val feedKinds: Set<String> = setOf("task", "ach", "item", "memo"),
     val feedLimit: Int = 3,
+    /** 主页速览显示的入口 id 集合（DataStore 持久化，全部 6 个为默认） */
+    val quickEntries: Set<String> = DEFAULT_QUICK_ENTRIES,
     /** v1.0.3：全量数据包（历年今日 / 今日一签 / 连续成长都要全量口径） */
     val bundle: Bundle = Bundle(),
     val customTitle: String = "",
@@ -257,6 +264,13 @@ class HomeViewModel @Inject constructor(
     /** 最近动态首页显示条数（0 = 不限制；旧版本无该键默认 3，与原 ACT_LIMIT 一致） */
     private val feedLimitFlow: Flow<Int> = settingsDs.homeFeedLimit
 
+    /** 主页速览自定义入口（DataStore 持久化；解码为空集时回落全入口，防止「全部隐藏」死局） */
+    private val quickEntriesFlow: Flow<Set<String>> = settingsDs.homeQuickEntriesJson.map { txt ->
+        if (txt.isBlank()) DEFAULT_QUICK_ENTRIES
+        else runCatching { json.decodeFromString(SetSerializer(String.serializer()), txt) }
+            .getOrNull()?.takeIf { it.isNotEmpty() } ?: DEFAULT_QUICK_ENTRIES
+    }
+
     /** v1.0.3：自定义称号 */
     private val customTitleFlow: Flow<String> = settingsDs.customTitle
 
@@ -289,6 +303,7 @@ class HomeViewModel @Inject constructor(
             .combine(customFlow) { parts, custom -> parts.copy(customTimeline = custom) }
             .combine(feedFilterFlow) { parts, kinds -> parts.copy(feedKinds = kinds) }
             .combine(feedLimitFlow) { parts, limit -> parts.copy(feedLimit = limit) }
+            .combine(quickEntriesFlow) { parts, quick -> parts.copy(quickEntries = quick) }
             .combine(bundleFlow) { parts, bundle -> parts.copy(bundle = bundle) }
             .combine(customTitleFlow) { parts, title -> parts.copy(customTitle = title) }
             .combine(badgeIdsFlow) { parts, ids -> parts.copy(badgeIds = ids) }
@@ -346,6 +361,16 @@ class HomeViewModel @Inject constructor(
     /** 设置最近动态首页显示条数（0 = 不限制） */
     fun setFeedLimit(n: Int) {
         viewModelScope.launch { settingsDs.setHomeFeedLimit(n) }
+    }
+
+    /** 设置主页速览显示的入口集合（至少保留一个，空集请求直接忽略） */
+    fun setQuickEntries(entries: Set<String>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch {
+            settingsDs.setHomeQuickEntriesJson(
+                json.encodeToString(SetSerializer(String.serializer()), entries)
+            )
+        }
     }
 
     /** 用户在「全部动态」页手动添加一条自定义动态（kind=custom，随动态流展示） */
@@ -486,6 +511,7 @@ class HomeViewModel @Inject constructor(
             customTimeline = customTimeline,
             feedKinds = feedKinds,
             feedLimit = feedLimit,
+            quickEntries = quickEntries,
             // ————— v1.0.3 情绪价值与成长 —————
             greeting = Greeting.build(
                 Greeting.now(),

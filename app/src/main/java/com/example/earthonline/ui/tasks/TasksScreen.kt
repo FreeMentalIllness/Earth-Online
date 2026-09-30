@@ -1,5 +1,9 @@
 package com.example.earthonline.ui.tasks
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -27,11 +31,13 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -135,7 +141,8 @@ fun TasksScreen(
         if (combo > 0) { delay(4_000); combo = 0 }
     }
     LaunchedEffect(celebrateId) {
-        if (celebrateId != null) { delay(700); celebrateId = null }
+        // 950ms = 撒花动画（900ms）+ 50ms 余量，光晕/撒花共用该窗口
+        if (celebrateId != null) { delay(950); celebrateId = null }
     }
 
     // ————— v1.0.3 长按拖拽排序：仅允许在同级兄弟间交换（不破坏任务树结构） —————
@@ -143,6 +150,7 @@ fun TasksScreen(
     var dragIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -316,6 +324,12 @@ fun TasksScreen(
                     }
                 }
             }
+        }
+    }
+
+        // v1.0.4 撒花庆祝：完成任务的粒子迸发，覆盖层不拦截点击（Canvas 无触摸处理）
+        if (celebrateId != null) {
+            ConfettiBurst(burstKey = celebrateId, combo = combo)
         }
     }
 
@@ -752,5 +766,72 @@ private fun TaskEditDialog(
                 }
             }
         )
+    }
+}
+
+/**
+ * v1.0.4 撒花庆祝：勾选完成任务时从屏幕上部迸发的彩纸粒子。
+ * 纯 Canvas + 随机种子实现，零第三方依赖、零表结构改动；
+ * 与既有的震动 / 琥珀光晕 / 音效共用同一触发点，连击时粒子放大（封顶 1.4x）。
+ * 覆盖层只画不摸：Canvas 不消费触摸事件，不影响下方列表的任何交互。
+ */
+private data class ConfettiParticle(
+    val vx: Float,      // 水平初速（单位时间占屏宽比例，正 = 向右）
+    val vy: Float,      // 垂直初速（负 = 向上抛）
+    val g: Float,       // 重力加速度（单位时间占屏高比例）
+    val radius: Float,  // 基准半径（dp，绘制时按屏幕密度换算）
+    val color: Color,
+    val seed: Float     // 相位扰动，让粒子下落节奏错开
+)
+
+@Composable
+private fun ConfettiBurst(burstKey: String?, combo: Int) {
+    if (burstKey == null) return
+    var progress by remember(burstKey) { mutableStateOf(0f) }
+    LaunchedEffect(burstKey) {
+        animate(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 900, easing = LinearEasing)
+        ) { v, _ -> progress = v }
+    }
+    // 以任务 id 为随机种子：同一次庆祝粒子轨迹稳定，重组/连击不跳变
+    val particles = remember(burstKey) {
+        val rnd = kotlin.random.Random(burstKey.hashCode())
+        val palette = listOf(
+            Color(0xFFD4A373), // 暖琥珀
+            Color(0xFFE0A96D), // 亮琥珀
+            Color(0xFF588157), // 叶绿
+            Color(0xFFBC4749), // 陶红
+            Color(0xFFE6C079)  // 麦金
+        )
+        List(30) {
+            ConfettiParticle(
+                vx = rnd.nextFloat() * 1.2f - 0.6f,
+                vy = -(0.30f + rnd.nextFloat() * 0.45f),
+                g = 1.1f + rnd.nextFloat() * 0.5f,
+                radius = 3f + rnd.nextFloat() * 4f,
+                color = palette[rnd.nextInt(palette.size)],
+                seed = rnd.nextFloat() * 0.1f
+            )
+        }
+    }
+    val density = LocalDensity.current
+    Canvas(Modifier.fillMaxSize()) {
+        val t = progress * 0.9f + 0.001f
+        val cx = size.width / 2f
+        val cy = size.height * 0.30f
+        // 连击强度：每次连击粒子放大 12%，封顶 1.4x 防过曝
+        val scale = (1f + 0.12f * (combo - 1).coerceAtLeast(0)).coerceAtMost(1.4f)
+        particles.forEach { p ->
+            val x = cx + p.vx * t * size.width * 0.5f
+            val y = cy + (p.vy * (t + p.seed) + 0.5f * p.g * t * t) * size.height
+            drawCircle(
+                color = p.color,
+                radius = p.radius * density.density * scale,
+                center = Offset(x, y),
+                alpha = (1f - progress).coerceIn(0f, 1f)
+            )
+        }
     }
 }
