@@ -89,6 +89,46 @@ class BackpackViewModel @Inject constructor(
 
     fun deleteItem(id: String) = viewModelScope.launch { itemRepo.delete(id) }
 
+    /**
+     * v1.0.4：编辑已有物品。此前条目保存后只能删除重建（点击卡片无响应），
+     * 现在卡片可点开编辑对话框，仅覆盖名称 / 类型 / 故事 / 分类四个字段，
+     * createdAt 与 id 保持不变（WebDAV 按主键合并的语义不受影响）。
+     */
+    fun updateItem(target: ItemEntity, name: String, type: String, desc: String?, category: String?) {
+        val n = name.trim()
+        if (n.isBlank()) return
+        viewModelScope.launch {
+            itemRepo.update(
+                target.copy(
+                    name = n,
+                    type = type,
+                    description = desc?.takeIf { it.isNotBlank() },
+                    category = category?.takeIf { it.isNotBlank() }
+                )
+            )
+            activityRepo.add(ActivityEntity(id = uid("act"), time = nowIso(), kind = "item", title = "整理了物品：$n"))
+        }
+    }
+
+    /**
+     * v1.0.4：编辑已有收藏。标题 / 备注 / 分类可改；文件附件保持原样
+     *（替换附件涉及旧文件清理与元信息重写，本期不做，避免半删状态）。
+     */
+    fun updateCollection(target: CollectionEntity, title: String, note: String?, category: String?) {
+        val t = title.trim()
+        if (t.isBlank()) return
+        viewModelScope.launch {
+            collectionRepo.update(
+                target.copy(
+                    title = t,
+                    note = note?.takeIf { it.isNotBlank() },
+                    category = category?.takeIf { it.isNotBlank() }
+                )
+            )
+            activityRepo.add(ActivityEntity(id = uid("act"), time = nowIso(), kind = "item", title = "整理了收藏：$t"))
+        }
+    }
+
     fun addCollection(title: String, note: String?, category: String?, sourceUri: Uri?) {
         val t = title.trim()
         if (t.isBlank()) return

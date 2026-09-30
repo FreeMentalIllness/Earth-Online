@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -68,6 +69,9 @@ fun BackpackScreen(
     var showItem by remember { mutableStateOf(false) }
     var showCollection by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
+    // v1.0.4：编辑已有条目（null = 未在编辑）。点卡片进入编辑，保存即生效。
+    var editItem by remember { mutableStateOf<ItemEntity?>(null) }
+    var editCollection by remember { mutableStateOf<CollectionEntity?>(null) }
     val context = LocalContext.current
 
     Scaffold(
@@ -99,7 +103,9 @@ fun BackpackScreen(
                     categories = itemCats,
                     vm = vm,
                     // 空状态里的「添加第一件物品」要能打开父级的新增对话框
-                    onAddItem = { showItem = true }
+                    onAddItem = { showItem = true },
+                    // v1.0.4：点击物品卡片进入编辑
+                    onEditItem = { editItem = it }
                 )
             } else {
                 CollectionsPane(
@@ -107,7 +113,8 @@ fun BackpackScreen(
                     categories = collectionCats,
                     vm = vm,
                     context = context,
-                    onAddCollection = { showCollection = true }
+                    onAddCollection = { showCollection = true },
+                    onEditCollection = { editCollection = it }
                 )
             }
         }
@@ -121,12 +128,32 @@ fun BackpackScreen(
             onSubmit = { n, ty, d, c -> vm.addItem(n, ty, d, c); showItem = false }
         )
     }
+    // v1.0.4：编辑物品（复用新增对话框，预填当前值）
+    editItem?.let { target ->
+        ItemDialog(
+            initial = target,
+            categories = itemCats,
+            onCreateCategory = { vm.addCategory(SCOPE_ITEM, it) },
+            onDismiss = { editItem = null },
+            onSubmit = { n, ty, d, c -> vm.updateItem(target, n, ty, d, c); editItem = null }
+        )
+    }
     if (showCollection) {
         CollectionDialog(
             categories = collectionCats,
             onCreateCategory = { vm.addCategory(SCOPE_COLLECTION, it) },
             onDismiss = { showCollection = false },
             onSubmit = { t, n, c, uri -> vm.addCollection(t, n, c, uri); showCollection = false }
+        )
+    }
+    // v1.0.4：编辑收藏（附件保持原样，标题/备注/分类可改）
+    editCollection?.let { target ->
+        CollectionDialog(
+            initial = target,
+            categories = collectionCats,
+            onCreateCategory = { vm.addCategory(SCOPE_COLLECTION, it) },
+            onDismiss = { editCollection = null },
+            onSubmit = { t, n, c, _ -> vm.updateCollection(target, t, n, c); editCollection = null }
         )
     }
     if (showCategoryManager) {
@@ -151,7 +178,8 @@ private fun ItemsPane(
     items: List<ItemEntity>,
     categories: List<BagCategoryEntity>,
     vm: BackpackViewModel,
-    onAddItem: () -> Unit
+    onAddItem: () -> Unit,
+    onEditItem: (ItemEntity) -> Unit
 ) {
     // 顶部模糊搜索（名称 / 描述 / 分类）
     var query by remember { mutableStateOf("") }
@@ -209,15 +237,19 @@ private fun ItemsPane(
                     filtered,
                     key = { it.id },
                     contentType = { "itemCard" }
-                ) { Box(Modifier.animateItem()) { ItemCard(it, vm::deleteItem) } }
+                ) { Box(Modifier.animateItem()) { ItemCard(it, vm::deleteItem, onEdit = { onEditItem(it) }) } }
             }
         }
     }
 }
 
 @Composable
-private fun ItemCard(item: ItemEntity, onDelete: (String) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.ItemRadius)) {
+private fun ItemCard(item: ItemEntity, onDelete: (String) -> Unit, onEdit: () -> Unit) {
+    // v1.0.4：整卡可点进入编辑（删除按钮自身消费点击，不会误触）
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit),
+        shape = RoundedCornerShape(UiDimens.ItemRadius)
+    ) {
         Row(
             modifier = Modifier.padding(12.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -258,7 +290,8 @@ private fun CollectionsPane(
     categories: List<BagCategoryEntity>,
     vm: BackpackViewModel,
     context: Context,
-    onAddCollection: () -> Unit
+    onAddCollection: () -> Unit,
+    onEditCollection: (CollectionEntity) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var cat by remember { mutableStateOf<String?>(null) }
@@ -311,18 +344,22 @@ private fun CollectionsPane(
                     filtered,
                     key = { it.id },
                     contentType = { "collectionCard" }
-                ) { Box(Modifier.animateItem()) { CollectionCard(it, vm, context) } }
+                ) { Box(Modifier.animateItem()) { CollectionCard(it, vm, context, onEdit = { onEditCollection(it) }) } }
             }
         }
     }
 }
 
 @Composable
-private fun CollectionCard(c: CollectionEntity, vm: BackpackViewModel, context: Context) {
+private fun CollectionCard(c: CollectionEntity, vm: BackpackViewModel, context: Context, onEdit: () -> Unit) {
     val meta = remember(c.fileMetaJson) {
         c.fileMetaJson?.let { runCatching { Json.decodeFromString(CollectionFileMeta.serializer(), it) }.getOrNull() }
     }
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(UiDimens.ItemRadius)) {
+    // v1.0.4：整卡可点进入编辑（删除 / 打开按钮各自消费点击，不会误触）
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit),
+        shape = RoundedCornerShape(UiDimens.ItemRadius)
+    ) {
         Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(c.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -372,12 +409,14 @@ private fun ItemDialog(
     categories: List<BagCategoryEntity>,
     onCreateCategory: (String) -> Unit,
     onDismiss: () -> Unit,
-    onSubmit: (name: String, type: String, desc: String?, category: String?) -> Unit
+    onSubmit: (name: String, type: String, desc: String?, category: String?) -> Unit,
+    initial: ItemEntity? = null
 ) {
-    var name by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf("physical") }
-    var desc by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf<String?>(null) }
+    // v1.0.4：initial 非空 = 编辑模式，预填当前值
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var type by remember { mutableStateOf(initial?.type ?: "physical") }
+    var desc by remember { mutableStateOf(initial?.description ?: "") }
+    var category by remember { mutableStateOf(initial?.category) }
     AnimatedAlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -391,7 +430,7 @@ private fun ItemDialog(
             ) { Text("保存") }
         },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },
-        title = { Text("新增物品") },
+        title = { Text(if (initial == null) "新增物品" else "编辑物品") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") },
@@ -422,11 +461,13 @@ private fun CollectionDialog(
     categories: List<BagCategoryEntity>,
     onCreateCategory: (String) -> Unit,
     onDismiss: () -> Unit,
-    onSubmit: (title: String, note: String?, category: String?, fileUri: Uri?) -> Unit
+    onSubmit: (title: String, note: String?, category: String?, fileUri: Uri?) -> Unit,
+    initial: CollectionEntity? = null
 ) {
-    var title by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf<String?>(null) }
+    // v1.0.4：initial 非空 = 编辑模式（附件只读展示，不提供替换）
+    var title by remember { mutableStateOf(initial?.title ?: "") }
+    var note by remember { mutableStateOf(initial?.note ?: "") }
+    var category by remember { mutableStateOf(initial?.category) }
     var fileUri by remember { mutableStateOf<Uri?>(null) }
     var fileName by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -434,6 +475,11 @@ private fun CollectionDialog(
         uri?.let {
             fileUri = it
             fileName = fileNameFromUri(context, it)
+        }
+    }
+    val initialMeta = remember(initial?.fileMetaJson) {
+        initial?.fileMetaJson?.let {
+            runCatching { Json.decodeFromString(CollectionFileMeta.serializer(), it) }.getOrNull()
         }
     }
     AnimatedAlertDialog(
@@ -449,7 +495,7 @@ private fun CollectionDialog(
             ) { Text("保存") }
         },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },
-        title = { Text("新增收藏") },
+        title = { Text(if (initial == null) "新增收藏" else "编辑收藏") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("标题") },
@@ -462,10 +508,19 @@ private fun CollectionDialog(
                     onSelect = { category = it },
                     onCreate = onCreateCategory
                 )
-                OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.AttachFile, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(fileName ?: "选择文件附件（可选）")
+                if (initial == null) {
+                    OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.AttachFile, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(fileName ?: "选择文件附件（可选）")
+                    }
+                } else {
+                    // 编辑模式：附件不可替换（替换涉及旧文件清理，误操作风险高），只读展示
+                    Text(
+                        if (initialMeta != null) "附件：${initialMeta.name}（保持不变）" else "未附带文件",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

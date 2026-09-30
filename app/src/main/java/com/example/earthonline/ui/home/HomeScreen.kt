@@ -1551,12 +1551,17 @@ private val MEMO_TYPES = listOf(
 
 @Composable
 private fun MemoTypeRow(selected: String, onSelect: (String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // v1.0.4：类型选择行改为单行横向滚动 —— 任何系统字号下四个 chip 都保持在
+    // 同一水平线上，放得下时一屏铺开，放不下时可滑动，绝不换行也不截断文字。
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         MEMO_TYPES.forEach { (value, emoji, label) ->
             FilterChip(
                 selected = selected == value,
                 onClick = { onSelect(value) },
-                label = { Text("$emoji $label", style = MaterialTheme.typography.labelSmall) }
+                label = { Text("$emoji $label", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false) }
             )
         }
     }

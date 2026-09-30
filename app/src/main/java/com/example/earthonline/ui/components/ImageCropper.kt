@@ -98,8 +98,11 @@ fun ImageCropperDialog(
                 val srcW = bounds.outWidth
                 val srcH = bounds.outHeight
                 if (srcW <= 0 || srcH <= 0) return@runCatching null
-                // 预览降采样：最长边 ≤ 1024，再取整为 2 的幂（BitmapFactory 只可靠识别 2 的幂）
-                val rawSample = max(1, (max(srcW, srcH) / 1024f).toInt())
+                // v1.0.4：预览降采样目标 1024 -> 2048。裁剪视口是全屏（宽普遍 1080+ 物理像素），
+                // 1024 的预览位图在初始 cover 状态就被上采样，放大到 2~4x 时肉眼可见地糊，
+                // 用户会误以为「裁出来也是糊的」；2048 保证常用缩放范围内预览始终锐利，
+                // 内存代价约 2048×2048×4 ≈ 16MB，仅在本对话框存活期间持有，可接受。
+                val rawSample = max(1, (max(srcW, srcH) / 2048f).toInt())
                 var sample = 1
                 while (sample * 2 <= rawSample) sample *= 2
                 val pOpts = BitmapFactory.Options().apply { inSampleSize = sample }
@@ -335,8 +338,10 @@ private fun cropToPng(
     val input = context.contentResolver.openInputStream(uri) ?: return null
     val decoder = input.use { BitmapRegionDecoder.newInstance(it, false) } ?: return null
     try {
-        // 超大选区兜底降采样（2 的幂），上限 2048px
-        val rawSample = max(1, (max(rect.width(), rect.height()) / 2048f).toInt())
+        // 超大选区兜底降采样（2 的幂）。v1.0.4：上限 2048 -> 3072 —— 2048 会把
+        // 2K/3K 屏的壁纸裁剪输出压到不足屏幕原生分辨率，铺满时被拉糊；
+        // 3072 长边的区域解码内存约 20MB 量级，画质余量与 OOM 风险平衡点。
+        val rawSample = max(1, (max(rect.width(), rect.height()) / 3072f).toInt())
         var sample = 1
         while (sample * 2 <= rawSample) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }

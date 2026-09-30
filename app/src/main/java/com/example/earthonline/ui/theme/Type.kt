@@ -51,7 +51,12 @@ fun scaledTypography(scale: Float): Typography {
     )
 }
 
-/** 字号档位 → 缩放系数（与 Web 端 FONT_SCALES 对齐：std / lg / xl） */
+/**
+ * 字号档位 → 缩放系数。
+ * v1.0.4：应用内「字号大小」设置已移除，主题固定传 "std"（= 1.0，不做二次缩放），
+ * 文字大小完全跟随系统字体缩放（Compose fontScale 由系统无障碍注入）。
+ * 机制保留以备未来恢复档位（与 Web 端 FONT_SCALES 对齐：std / lg / xl）。
+ */
 fun fontScaleOf(key: String): Float = when (key) {
     "lg" -> 1.1f
     "xl" -> 1.2f

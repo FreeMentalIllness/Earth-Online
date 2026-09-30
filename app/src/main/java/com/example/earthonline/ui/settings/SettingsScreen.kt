@@ -51,7 +51,7 @@ fun SettingsScreen(vm: SettingsViewModel, moreActions: MoreMenuActions) {
                 SettingsNavItem(
                     icon = Icons.Filled.Palette,
                     label = "外观",
-                    hint = "主题 · 壁纸 · 字号"
+                    hint = "主题 · 壁纸"
                 ) { moreActions.onNavigate(Screen.SettingsAppearance.route) }
             }
             item {

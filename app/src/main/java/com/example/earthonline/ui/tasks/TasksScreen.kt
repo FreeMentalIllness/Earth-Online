@@ -12,7 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -42,7 +44,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,6 +93,8 @@ fun TasksScreen(
     openAddOnEntry: Boolean = false
 ) {
     val allTasks by vm.tasks.collectAsStateWithLifecycle()
+    // v1.0.4：「隐藏已完成任务」开关（DataStore 持久化，跨会话记住）
+    val hideDone by vm.hideDone.collectAsStateWithLifecycle(initialValue = false)
     var category by remember { mutableStateOf("main") }
     val collapsed = remember { mutableStateOf(setOf<String>()) }
     var showAdd by remember { mutableStateOf(openAddOnEntry) }
@@ -101,11 +104,20 @@ fun TasksScreen(
     var showDoneOnly by remember { mutableStateOf(false) }
 
     val filtered = remember(allTasks, category) { allTasks.filter { it.category == category } }
-    val tree = remember(filtered) { buildTaskTree(filtered) }
-    val flat = remember(tree, collapsed.value) { flattenTaskTree(tree, collapsed.value) }
-    val visible = remember(flat, showDoneOnly) {
-        if (showDoneOnly) flat.filter { it.task.status == "done" } else flat
+    // v1.0.4：「只看已完成 / 隐藏已完成」在建树前过滤源列表 ——
+    //  - 只看已完成：仅保留 done 节点，已完成分支可完整回看；
+    //  - 隐藏已完成：移除 done 节点，其下未完成的子任务由 buildTaskTree 的孤儿兜底提升为根，不会整支消失。
+    // 在此之前先拍平再过滤会破坏父子连接线的层级信息。
+    val treeSource = remember(filtered, showDoneOnly, hideDone) {
+        when {
+            showDoneOnly -> filtered.filter { it.status == "done" }
+            hideDone -> filtered.filter { it.status != "done" }
+            else -> filtered
+        }
     }
+    val tree = remember(treeSource) { buildTaskTree(treeSource) }
+    val flat = remember(tree, collapsed.value) { flattenTaskTree(tree, collapsed.value) }
+    val visible = flat
 
     // 编辑对话框里的「父任务」候选：同分类下的全部任务（编辑自身时要排除自己及其后代，避免成环）
     val parentOptions = remember(filtered, editing) {
@@ -122,7 +134,7 @@ fun TasksScreen(
         filtered.filter { it.id !in exclude }
     }
 
-    val doneCount = remember(flat) { flat.count { it.task.status == "done" } }
+    val doneCount = remember(filtered) { filtered.count { it.status == "done" } }
 
     // ————— v1.0.3 庆祝三件套：勾选完成时轻震动 + 琥珀光晕 + 清脆音效，连击时光效渐强 —————
     val haptic = LocalHapticFeedback.current
@@ -174,36 +186,60 @@ fun TasksScreen(
                 }
             }
 
-            // 工具行：概览 + 全部展开 / 折叠
+            // 工具行：概览 + 视图开关 + 全部展开 / 折叠
             if (flat.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = UiDimens.ListPad, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "共 ${flat.size} 项 · 已完成 $doneCount",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = showDoneOnly,
-                        onClick = { showDoneOnly = !showDoneOnly },
-                        label = { Text("已完成 $doneCount") },
-                        modifier = Modifier.height(32.dp)
-                    )
-                    IconButton(onClick = { collapsed.value = emptySet() }) {
-                        Icon(Icons.Filled.UnfoldMore, contentDescription = "全部展开")
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = UiDimens.ListPad, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "共 ${flat.size} 项 · 已完成 $doneCount",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { collapsed.value = emptySet() }) {
+                            Icon(Icons.Filled.UnfoldMore, contentDescription = "全部展开")
+                        }
+                        IconButton(onClick = {
+                            collapsed.value = tree
+                                .filter { it.children.isNotEmpty() }
+                                .map { it.task.id }
+                                .toSet()
+                        }) {
+                            Icon(Icons.Filled.UnfoldLess, contentDescription = "全部折叠")
+                        }
                     }
-                    IconButton(onClick = {
-                        collapsed.value = tree
-                            .filter { it.children.isNotEmpty() }
-                            .map { it.task.id }
-                            .toSet()
-                    }) {
-                        Icon(Icons.Filled.UnfoldLess, contentDescription = "全部折叠")
+                    // v1.0.4：视图开关行 —— 「隐藏已完成」只看未完成，「只看已完成」回看做完的；
+                    // 两个开关互斥（打开一个自动关掉另一个），持久化走 DataStore。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = UiDimens.ListPad),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = hideDone,
+                            onClick = {
+                                val next = !hideDone
+                                vm.setHideDone(next)
+                                if (next) showDoneOnly = false
+                            },
+                            label = { Text("隐藏已完成") },
+                            modifier = Modifier.height(32.dp)
+                        )
+                        FilterChip(
+                            selected = showDoneOnly,
+                            onClick = {
+                                showDoneOnly = !showDoneOnly
+                                if (showDoneOnly && hideDone) vm.setHideDone(false)
+                            },
+                            label = { Text("只看已完成") },
+                            modifier = Modifier.height(32.dp)
+                        )
                     }
                 }
             }
@@ -215,6 +251,13 @@ fun TasksScreen(
                         emoji = "✅",
                         title = "还没有已完成的任务",
                         message = "完成一条任务就会出现在这里，方便你回顾一路走来的脚印。"
+                    )
+                } else if (hideDone && filtered.isNotEmpty()) {
+                    // v1.0.4：隐藏已完成模式下全部做完时的空状态（区别于「分类本身是空的」）
+                    EmptyState(
+                        emoji = "🎉",
+                        title = "这个分类下没有未完成的任务",
+                        message = "都清空啦。想回看已完成的记录，可以打开「只看已完成」。"
                     )
                 } else {
                     // v1.2.1：空状态引导 —— 光秃秃一行「暂无任务」不告诉用户下一步该干嘛
@@ -586,7 +629,7 @@ private fun StatusChip(status: String) {
  * 任务编辑 / 新增对话框。
  * 相比旧版补齐：父任务选择（决定层级）、状态选择、到期日不再限于 todo 分类。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TaskEditDialog(
     initialTitle: String = "",
@@ -634,7 +677,11 @@ private fun TaskEditDialog(
         },
         title = { Text(if (onDelete != null) "编辑任务" else "新增任务") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // v1.0.4：内容可滚动 —— 父任务卡 + 状态 FlowRow + 日期 + 备注在长内容 / 大字号下不溢出
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = title, onValueChange = { title = it },
                     label = { Text("标题") }, singleLine = true, modifier = Modifier.fillMaxWidth()
@@ -668,30 +715,28 @@ private fun TaskEditDialog(
                 // 状态
                 Column {
                     Text("状态", style = MaterialTheme.typography.labelMedium)
-                    /* v1.0.1 布局修正：四个状态选项改为「等宽平分一行」。
-                       原来是 Row + 各自 wrap 宽度，四个 chip 的自然宽度加起来超过了对话框内容宽度，
-                       而 Row 不会换行 —— 于是最后一个「已完成」被压到最窄，文字被迫折成
-                       「已完 / 成」两行，宽高与其他三个单行选项明显不一致（看着像错位）。
-                       现在改成 weight(1f) 等宽 + 单行不折行：四个选项左右对齐、宽高一致，
-                       窄屏或大字体下也只会把文字收窄，不会再把某一项挤成两行。 */
-                    Row(
+                    /* v1.0.1 布局修正 + v1.0.4 二次修正：
+                       v1.0.1 用 Row + weight(1f) 等宽单行解决了「已完成」被挤成两行的问题，
+                       但 weight + softWrap=false + Clip 在大字号 / 窄屏下会直接把超宽文字
+                       裁掉（用户看到「已完」缺字）。现在改为 FlowRow 自然宽度布局：
+                       空间够时四个选项铺同一行，放不下时整体换到下一行——
+                       每个 chip 永远按自身内容宽度渲染，任何字号下文字都完整显示。 */
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         STATUSES.forEach { (key, label) ->
                             FilterChip(
                                 selected = status == key,
                                 onClick = { status = key },
-                                modifier = Modifier.weight(1f),
                                 label = {
                                     Text(
                                         label,
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
                                         softWrap = false,
-                                        textAlign = TextAlign.Center,
-                                        overflow = TextOverflow.Clip,
-                                        modifier = Modifier.fillMaxWidth()
+                                        textAlign = TextAlign.Center
                                     )
                                 }
                             )

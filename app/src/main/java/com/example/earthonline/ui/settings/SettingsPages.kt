@@ -85,7 +85,8 @@ fun AppearanceRoute(
     val theme by vm.theme.collectAsStateWithLifecycle(initialValue = "system")
     val wallpaper by vm.wallpaper.collectAsStateWithLifecycle(initialValue = "")
     val wallpaperAlpha by vm.wallpaperAlpha.collectAsStateWithLifecycle(initialValue = 0.35f)
-    val fontScale by vm.fontScale.collectAsStateWithLifecycle(initialValue = "std")
+    // v1.0.4：字号档位设置已移除 —— 应用内不再额外缩放文字，直接跟随系统字体大小，
+    // 由系统无障碍设置统一控制（对应需求「删除字号大小设置，自动适配」）。
     // v1.0.3：壁纸从记忆相册随机轮换
     val wallpaperRotate by vm.wallpaperRotate.collectAsStateWithLifecycle(initialValue = false)
     val memoryPhotosJson by vm.memoryPhotosJson.collectAsStateWithLifecycle(initialValue = "")
@@ -183,18 +184,8 @@ fun AppearanceRoute(
                             enabled = albumCount > 0
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text("字号", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ThemeChip("标准", "std", fontScale) { vm.setFontScale("std") }
-                        ThemeChip("大", "lg", fontScale) { vm.setFontScale("lg") }
-                        ThemeChip("特大", "xl", fontScale) { vm.setFontScale("xl") }
-                    }
-                    Text(
-                        "只放大内容文字，最大档约放大 20%。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // v1.0.4：字号档位设置已移除。文字大小完全跟随系统字体缩放（无障碍），
+                    // 应用内布局全部自适应（FlowRow / 横向滚动 / 权重布局），不再需要档位干预。
                 }
             }
         }

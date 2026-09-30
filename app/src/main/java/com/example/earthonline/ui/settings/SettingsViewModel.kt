@@ -52,10 +52,10 @@ class SettingsViewModel @Inject constructor(
     val autoSync: Flow<Boolean> = settings.autoSync
     /** 上次同步时间（空串 = 从未同步） */
     val lastSyncAt: Flow<String> = settings.lastSyncAt
-    /** v1.2.0：字号档位（std / lg / xl） */
-    val fontScale: Flow<String> = settings.fontScale
     /** v1.2.1：成就解锁音效开关 */
     val achSound: Flow<Boolean> = settings.achSound
+    // v1.0.4：字号档位（fontScale / setFontScale）已随「字号大小设置移除」一并下线，
+    // 文字大小改为完全跟随系统字体缩放。
 
     // v1.0.3：壁纸随机轮换 / 记忆相册 / 通知栏快捷记录
     val wallpaperRotate: Flow<Boolean> = settings.wallpaperRotate
@@ -65,7 +65,6 @@ class SettingsViewModel @Inject constructor(
     fun setQuickNotif(v: Boolean) = viewModelScope.launch { settings.setQuickNotif(v) }
 
     fun setTheme(v: String) = viewModelScope.launch { settings.setTheme(v) }
-    fun setFontScale(v: String) = viewModelScope.launch { settings.setFontScale(v) }
     fun setAchSound(v: Boolean) = viewModelScope.launch { settings.setAchSound(v) }
     fun setAutoSync(v: Boolean) = viewModelScope.launch { settings.setAutoSync(v) }
     fun setNotify(v: Boolean) = viewModelScope.launch { settings.setNotify(v) }

@@ -4,6 +4,7 @@ import com.example.earthonline.ui.components.AnimatedAlertDialog
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -75,7 +76,18 @@ fun CategoryManagerDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // v1.0.4：内容可滚动 —— 顶部说明行 + 分类列表在长内容 / 大字号下不再溢出对话框
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                // v1.0.4：说清两个按钮的分工——「添加」保存新分类，「完成」只是关窗。
+                // 此前只有一个「+」图标按钮，与右下角「完成」并列时用户常分不清哪个才是保存。
+                Text(
+                    "改动即时生效：输入名称后点「添加」保存；右下角「完成」仅关闭本窗口。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 // 新增
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
@@ -86,7 +98,7 @@ fun CategoryManagerDialog(
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    IconButton(
+                    Button(
                         onClick = {
                             if (newName.isNotBlank()) {
                                 onAdd(newName.trim())
@@ -94,7 +106,11 @@ fun CategoryManagerDialog(
                             }
                         },
                         enabled = newName.isNotBlank()
-                    ) { Icon(Icons.Filled.Add, contentDescription = "添加分类") }
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("添加")
+                    }
                 }
 
                 if (error != null) {

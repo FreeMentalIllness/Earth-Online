@@ -40,7 +40,8 @@ fun EarthOnlineAppRoot(
 ) {
     val onboardingDone by rootVm.onboardingDone.collectAsStateWithLifecycle(initialValue = null)
     val themePref by rootVm.theme.collectAsStateWithLifecycle(initialValue = null)
-    val fontScale by rootVm.fontScale.collectAsStateWithLifecycle(initialValue = "std")
+    // v1.0.4：字号档位已移除，不再读取 fontScale —— 排版直接跟随系统字体缩放
+    //（Compose 的 fontScale 由系统无障碍设置注入，应用内不再二次乘算）。
 
     LaunchedEffect(onboardingDone) { if (onboardingDone != null) onReady() }
     // 兜底：极端情况下（DataStore 异常慢）2s 后放行，不把用户永远摁在启动图上
@@ -58,7 +59,8 @@ fun EarthOnlineAppRoot(
         else -> isSystemInDarkTheme()
     }
 
-    EarthOnlineTheme(darkTheme = darkTheme, fontScaleKey = fontScale) {
+    // fontScaleKey 使用默认 "std"（缩放系数 1.0）：应用内不再覆盖字号
+    EarthOnlineTheme(darkTheme = darkTheme) {
         Box(Modifier.fillMaxSize()) {
             when (onboardingDone) {
                 null -> Box(
@@ -87,5 +89,5 @@ class RootViewModel @Inject constructor(
 ) : ViewModel() {
     val onboardingDone = settings.onboardingDone
     val theme = settings.theme
-    val fontScale = settings.fontScale
+    // v1.0.4：fontScale 暴露已移除（字号设置下线，跟随系统）
 }

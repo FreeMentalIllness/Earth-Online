@@ -14,6 +14,7 @@ import com.example.earthonline.util.todayStr
 import com.example.earthonline.util.uid
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,6 +38,14 @@ class TaskViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    /** v1.0.4：任务列表「隐藏已完成」开关（DataStore 持久化，跨会话记住用户偏好） */
+    val hideDone: StateFlow<Boolean> = settings.hideDoneTasks.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = false
+    )
+    fun setHideDone(v: Boolean) = viewModelScope.launch { settings.setHideDoneTasks(v) }
 
     fun addTask(
         title: String,

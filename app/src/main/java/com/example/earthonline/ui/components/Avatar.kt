@@ -86,8 +86,19 @@ fun UserAvatar(
             modifier = modifier.size(size).clip(CircleShape)
         )
     } else if (avatarData != null && avatarData!!.isNotEmpty()) {
+        // v1.0.4：旧版数据库字节数据同样按控件尺寸采样。此前裸传 ByteArray 会让 Coil
+        // 按原始尺寸解码（几百 KB 的 JPEG 解出 4000px 位图），既费内存，也没有跟文件
+        // 路径一致的清晰度表现；.size(px) + INEXACT 与上方文件分支完全同参。
+        val bytesRequest = remember(avatarData, px) {
+            ImageRequest.Builder(context)
+                .data(avatarData)
+                .size(px)
+                .precision(Precision.INEXACT)
+                .crossfade(true)
+                .build()
+        }
         AsyncImage(
-            model = avatarData,
+            model = bytesRequest,
             contentDescription = "头像",
             contentScale = ContentScale.Crop,
             modifier = modifier.size(size).clip(CircleShape)

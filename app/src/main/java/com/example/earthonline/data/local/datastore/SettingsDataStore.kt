@@ -49,7 +49,10 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val LAST_SYNC = stringPreferencesKey("earth_last_sync")
         /** v1.2.0：彩蛋计数器（对应 Web 的 state.eggs）。只有无法从数据推导的事件才存这里。 */
         val EGG_BLANK_TITLE = intPreferencesKey("egg_blank_title")
-        /** v1.2.0：字号档位（std / lg / xl，对应 Web 的 earth_font_scale） */
+        /**
+         * v1.2.0 引入的字号档位键。v1.0.4 起字号设置已移除（跟随系统字体缩放），
+         * 键保留仅作历史数据占位，不再读取也不再写入。
+         */
         val FONT_SCALE = stringPreferencesKey("earth_font_scale")
         /** v1.2.1：成就解锁音效开关（对应 Web 的 earth_ach_sound） */
         val ACH_SOUND = booleanPreferencesKey("earth_ach_sound")
@@ -77,6 +80,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         val EGG_THROWBACK = intPreferencesKey("egg_throwback")
         /** 已庆祝过的等级（= 周岁）；-1 = 从未记录（首次记录不庆祝，避免升级后首启误弹） */
         val LAST_CELEBRATED_LEVEL = intPreferencesKey("last_celebrated_level")
+        /** v1.0.4：任务列表「隐藏已完成任务」开关（对齐 Web 端 v1.0.3 同名能力） */
+        val HIDE_DONE_TASKS = booleanPreferencesKey("hide_done_tasks")
     }
 
     val onboardingDone: Flow<Boolean> = ds.data.map { it[ONBOARDING_DONE] ?: false }
@@ -96,10 +101,7 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     /** 彩蛋：空白标题保存被拒次数（≥3 解锁「空白也是一种态度」） */
     val eggBlankTitle: Flow<Int> = ds.data.map { it[EGG_BLANK_TITLE] ?: 0 }
 
-    /** 字号档位：std / lg / xl */
-    val fontScale: Flow<String> = ds.data.map {
-        when (it[FONT_SCALE]) { "lg", "xl" -> it[FONT_SCALE]!! else -> "std" }
-    }
+    // v1.0.4：fontScale flow 与 setFontScale 已随字号设置移除（跟随系统字体缩放）
 
     suspend fun setOnboardingDone(v: Boolean) = ds.edit { it[ONBOARDING_DONE] = v }
     suspend fun setTheme(v: String) = ds.edit { it[THEME] = v }
@@ -117,10 +119,7 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
         it[EGG_BLANK_TITLE] = ((it[EGG_BLANK_TITLE] ?: 0) + 1).coerceAtMost(999999)
     }
 
-    /** 设置字号档位（非法值一律回落 std） */
-    suspend fun setFontScale(v: String) = ds.edit {
-        it[FONT_SCALE] = if (v == "lg" || v == "xl") v else "std"
-    }
+    /** 设置字号档位 —— v1.0.4 已移除（跟随系统），保留空实现注释占位避免误用 */
 
     /** 成就解锁音效开关（默认开启） */
     val achSound: Flow<Boolean> = ds.data.map { it[ACH_SOUND] ?: true }
@@ -171,4 +170,8 @@ class SettingsDataStore @Inject constructor(@ApplicationContext private val cont
     /** 已庆祝过的等级（-1 = 从未记录） */
     val lastCelebratedLevel: Flow<Int> = ds.data.map { it[LAST_CELEBRATED_LEVEL] ?: -1 }
     suspend fun setLastCelebratedLevel(v: Int) = ds.edit { it[LAST_CELEBRATED_LEVEL] = v }
+
+    /** v1.0.4：任务列表「隐藏已完成任务」开关（默认关 = 显示全部） */
+    val hideDoneTasks: Flow<Boolean> = ds.data.map { it[HIDE_DONE_TASKS] ?: false }
+    suspend fun setHideDoneTasks(v: Boolean) = ds.edit { it[HIDE_DONE_TASKS] = v }
 }
