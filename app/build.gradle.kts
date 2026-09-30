@@ -60,12 +60,19 @@ android {
            同一套 Compose 代码在 debug 与 release 上的帧率差距可以到 2~3 倍。
            所以「体感卡顿」首先要排除 debug 包因素，测流畅度请用 staging / release。 */
         release {
-            // R8 代码压缩/混淆开启：R8 8.5.35 的 shaking 期 CME 已通过「AGP 升级至 8.7.3（R8 8.7.x）
-            // + proguard-rules.pro 保留 Hilt/WorkManager/Room/高德生成类」两处规避，不再以关闭混淆回退。
-            // 资源压缩（shrinkResources）保持关闭：Compose 资源与动态资源名易被误删，风险大于收益。
-            isMinifyEnabled = true
+            // 回归结论：R8 minify 在 AGP 8.5.2 / R8 8.5.x 下仍触发 ConcurrentModificationException
+            // （minifyReleaseWithR8 FAILED，shaking 期 CME，-dontoptimize 无法规避）。
+            // ef4d505 尝试重开 minify 但并未真正修复，且 proguardFiles 当时未挂上。
+            // 回退为关闭混淆：与 v1.0.3 已发布版本一致的稳定配置，APK 体积略大但不影响功能与发布。
+            // 若日后要重开 minify，需先升级 AGP（至少 8.7.x）或定位 shaking 期 CME 根因，而非仅靠 -dontoptimize。
+            isMinifyEnabled = false
             isShrinkResources = false
             isDebuggable = false
+            // 保留 proguard 引用（minify 关闭时忽略），便于未来重开时直接生效。
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // 未配置正式签名时回退调试签名：保证 assembleRelease 产物可直接装机，
             // 且 SHA1 与已在高德登记的调试版一致（地图 Key 不会失效）
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
