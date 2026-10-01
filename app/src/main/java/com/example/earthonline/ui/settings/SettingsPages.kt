@@ -45,15 +45,11 @@ import com.example.earthonline.ui.components.MoreMenuActions
 import com.example.earthonline.ui.components.CropShape
 import com.example.earthonline.ui.components.ImageCropperDialog
 import com.example.earthonline.ui.navigation.Screen
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
@@ -731,39 +727,17 @@ fun AboutRoute(
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateAvailable by remember { mutableStateOf<UpdateCheck?>(null) }
 
-    val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-    val lastDownloadId = remember { mutableStateOf(-1L) }
+    // v1.0.5：下载与安装抽到应用级 ApkInstaller（与启动更新弹窗共用）；
+    // 「安装未知应用」权限（Android 8.0+）的跳转与回执仍留在 UI 层（ActivityResult 必须在 Composable 注册）
+    val installer = vm.installer
     var pendingApkUrl by remember { mutableStateOf<String?>(null) }
 
-    fun startApkDownload(url: String) {
-        val req = DownloadManager.Request(Uri.parse(url)).apply {
-            setTitle("地球Online 更新")
-            setDescription("正在下载安装包…")
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "earth-online-update.apk")
-            setAllowedOverMetered(true)
-            setAllowedOverRoaming(true)
-        }
-        lastDownloadId.value = downloadManager.enqueue(req)
-        scope.launch { snackbar.showSnackbar("开始下载更新，完成后自动提示安装") }
-    }
-
-    fun installDownloadedApk(id: Long) {
-        downloadManager.query(DownloadManager.Query().setFilterById(id))?.use { c ->
-            if (!c.moveToFirst()) return@use
-            val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            val uriStr = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
-            if (status == DownloadManager.STATUS_SUCCESSFUL && !uriStr.isNullOrBlank()) {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(uriStr), "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                runCatching { context.startActivity(intent) }
-                    .onFailure { scope.launch { snackbar.showSnackbar("无法启动安装，请手动前往 Release 页面") } }
-            } else {
-                scope.launch { snackbar.showSnackbar("下载失败，请手动前往 Release 页面") }
-            }
+    // ApkInstaller 的用户消息（开始下载 / 下载失败 / 无法启动安装）→ Snackbar，消费即清空
+    val installerEvent by installer.events.collectAsStateWithLifecycle()
+    LaunchedEffect(installerEvent) {
+        installerEvent?.let {
+            snackbar.showSnackbar(it)
+            installer.consumeEvent()
         }
     }
 
@@ -774,7 +748,7 @@ fun AboutRoute(
             context.packageManager.canRequestPackageInstalls()
         val url = pendingApkUrl
         pendingApkUrl = null
-        if (canInstall && url != null) startApkDownload(url)
+        if (canInstall && url != null) installer.download(url)
         else scope.launch { snackbar.showSnackbar("未授权「安装未知应用」，已改为打开 Release 页面") }
     }
 
@@ -790,20 +764,8 @@ fun AboutRoute(
                 )
             )
         } else {
-            startApkDownload(apkUrl)
+            installer.download(apkUrl)
         }
-    }
-
-    DisposableEffect(Unit) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-                if (id == lastDownloadId.value) installDownloadedApk(id)
-            }
-        }
-        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        onDispose { context.unregisterReceiver(receiver) }
     }
 
     if (showSponsor) {

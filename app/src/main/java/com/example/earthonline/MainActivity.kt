@@ -1,17 +1,47 @@
 package com.example.earthonline
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
+import com.example.earthonline.data.network.UpdateInfo
+import com.example.earthonline.data.network.UpdateRepository
 import com.example.earthonline.ui.Root.EarthOnlineAppRoot
 import com.example.earthonline.ui.navigation.Screen
+import com.example.earthonline.ui.settings.AppInfo
+import com.example.earthonline.util.ApkInstaller
+import com.example.earthonline.util.openUrlInBrowser
 import com.example.earthonline.widget.OverviewWidget
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -27,6 +57,14 @@ class MainActivity : ComponentActivity() {
     /** 首帧内容是否已就绪（偏好读完）。由 EarthOnlineAppRoot 回调置位。 */
     @Volatile
     private var contentReady = false
+
+    // v1.0.5：启动静默检查更新（读 Release latest + 版本号比较）
+    @Inject lateinit var updateRepo: UpdateRepository
+    // v1.0.5：APK 下载 + 引导安装（与「关于」页共用同一单例）
+    @Inject lateinit var installer: ApkInstaller
+
+    /** 启动检查发现的新版本（非空 = 弹更新提示；用户点「稍后」本次启动不再打扰） */
+    private var startupUpdate by mutableStateOf<UpdateInfo?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Android 12+ SplashScreen API：清单已设 Theme.EarthOnline.Splash（postSplashScreenTheme 指回主主题）
@@ -50,6 +88,24 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             EarthOnlineAppRoot(onReady = { contentReady = true }, startRoute = startRoute)
+            // v1.0.5：启动检查到新版本 → 弹更新提示（失败静默，不打扰）
+            StartupUpdateDialog(
+                update = startupUpdate,
+                installer = installer,
+                onDismiss = { startupUpdate = null }
+            )
+        }
+
+        // v1.0.5：启动 3 秒后静默检查更新（避开首帧渲染高峰）；
+        // 无外网 / 被墙 / 限流一律静默，只有确有新版本才弹窗 —— 「稍后」后本次启动不再提醒。
+        lifecycleScope.launch {
+            delay(3000)
+            val info = runCatching {
+                updateRepo.checkLatest(AppInfo.repoOwner, AppInfo.repoName).getOrNull()
+            }.getOrNull() ?: return@launch
+            if (updateRepo.isNewer(info.version, BuildConfig.VERSION_NAME)) {
+                startupUpdate = info
+            }
         }
     }
 
@@ -72,4 +128,102 @@ class MainActivity : ComponentActivity() {
         /** 小组件 / 通知等外部入口指定落地页面的 key（值 = Screen 的 route） */
         const val EXTRA_ROUTE = "route"
     }
+}
+
+/**
+ * v1.0.5：启动检查到新版本时的提示弹窗。
+ * - 展示新版本号 + Release 更新说明（截断已有，最长 400 字）；
+ * - 有 APK 直链 → 「下载并安装」（Android 8.0+ 先引导授予「安装未知应用」，
+ *   回来后自动开始下载；下载完成由 ApkInstaller 的应用级广播调起安装器）；
+ * - 无直链 → 打开 Release 页面手动下载；
+ * - 「稍后」仅关闭本次弹窗，下次启动或手动「检查更新」会再次提醒。
+ * - ApkInstaller 的消息（开始下载 / 下载失败）在此处用 Toast 呈现 ——
+ *   「关于」页则用 Snackbar 消费同一条流，两者谁在前台谁消费。
+ */
+@Composable
+private fun StartupUpdateDialog(
+    update: UpdateInfo?,
+    installer: ApkInstaller,
+    onDismiss: () -> Unit
+) {
+    if (update == null) return
+    val context = LocalContext.current
+    var pendingUrl by remember { mutableStateOf<String?>(null) }
+
+    // ApkInstaller 消息 → Toast（此页没有 Snackbar 宿主，弹窗场景用 Toast 更轻）
+    LaunchedEffect(Unit) {
+        installer.events.collect { msg ->
+            msg?.let {
+                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                installer.consumeEvent()
+            }
+        }
+    }
+
+    // 「安装未知应用」授权回执：授权成功 → 继续下载；拒绝 → 静默（下次启动再提醒）
+    val installPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            context.packageManager.canRequestPackageInstalls()
+        val url = pendingUrl
+        pendingUrl = null
+        if (canInstall && url != null) installer.download(url)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("发现新版本 v${update.version}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "当前版本 v${AppInfo.version}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (update.notes.isNotBlank()) {
+                    Text(
+                        update.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .heightIn(max = 180.dp)
+                    )
+                }
+                Text(
+                    if (update.apkUrl != null)
+                        "下载完成后将自动提示安装；Android 8.0 及以上首次安装需授予「安装未知应用」权限。覆盖安装不会丢失本地数据。"
+                    else
+                        "未找到 APK 直链，将打开 Release 页面手动下载。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val url = update.apkUrl
+                if (url.isNullOrBlank()) {
+                    onDismiss()
+                    openUrlInBrowser(context, update.releaseUrl)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !context.packageManager.canRequestPackageInstalls()
+                ) {
+                    // 先授权再回来下载；弹窗先收起，回来后由授权回执继续
+                    pendingUrl = url
+                    installPermLauncher.launch(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.fromParts("package", context.packageName, null)
+                        )
+                    )
+                    onDismiss()
+                } else {
+                    installer.download(url)
+                    onDismiss()
+                }
+            }) { Text(if (update.apkUrl != null) "下载并安装" else "前往更新") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("稍后") } }
+    )
 }

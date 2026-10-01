@@ -40,6 +40,8 @@ class SettingsViewModel @Inject constructor(
     private val cloudSync: CloudSyncManager,
     private val autoBackup: AutoBackupManager,
     private val updateRepo: UpdateRepository,
+    // v1.0.5：APK 下载 + 引导安装（与启动更新弹窗共用同一应用级单例）
+    val installer: com.example.earthonline.util.ApkInstaller,
     // v1.0.5 清空数据：记忆相册原图文件清理
     private val memoryPhotoStore: com.example.earthonline.data.photos.MemoryPhotoStore
 ) : ViewModel() {
