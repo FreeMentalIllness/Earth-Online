@@ -22,7 +22,14 @@ import javax.inject.Singleton
 object NetworkModule {
     @Provides
     @Singleton
-    fun provideJson(): Json = Json { ignoreUnknownKeys = true }
+    /**
+     * v1.0.5 QA 修复：补 encodeDefaults = true。
+     * kotlinx.serialization 默认「等于默认值的字段不写出」，导致 Android 导出的备份里
+     * profile.xp=0、task.progress=0、parentId=null 等字段整体缺失 —— 与 Web 端
+     * JSON.stringify 的全字段导出不一致，跨端导入时契约不稳（Web 侧只能靠默认值兜底）。
+     * 显式写全字段 + ignoreUnknownKeys 容错读，导出语义与 Web 端对齐；主键合并逻辑不受影响。
+     */
+    fun provideJson(): Json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Provides
     @Singleton

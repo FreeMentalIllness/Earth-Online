@@ -187,60 +187,65 @@ fun TasksScreen(
             }
 
             // 工具行：概览 + 视图开关 + 全部展开 / 折叠
+            // v1.0.5 QA 修复：两个区块拆开判定。
+            // 原来整体挂在 flat.isNotEmpty() 上 —— 当某分类唯一任务是「已完成」时，
+            // 打开「隐藏已完成」后列表变空，开关行随工具行一起消失，
+            // 用户再也无法关闭开关恢复视图（实测抓到）。
+            // 现在开关行只要求「该分类下有任务」就常驻，保证任何时刻都能切回。
             if (flat.isNotEmpty()) {
-                Column {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = UiDimens.ListPad, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "共 ${flat.size} 项 · 已完成 $doneCount",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { collapsed.value = emptySet() }) {
-                            Icon(Icons.Filled.UnfoldMore, contentDescription = "全部展开")
-                        }
-                        IconButton(onClick = {
-                            collapsed.value = tree
-                                .filter { it.children.isNotEmpty() }
-                                .map { it.task.id }
-                                .toSet()
-                        }) {
-                            Icon(Icons.Filled.UnfoldLess, contentDescription = "全部折叠")
-                        }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = UiDimens.ListPad, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "共 ${flat.size} 项 · 已完成 $doneCount",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { collapsed.value = emptySet() }) {
+                        Icon(Icons.Filled.UnfoldMore, contentDescription = "全部展开")
                     }
-                    // v1.0.4：视图开关行 —— 「隐藏已完成」只看未完成，「只看已完成」回看做完的；
-                    // 两个开关互斥（打开一个自动关掉另一个），持久化走 DataStore。
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = UiDimens.ListPad),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        FilterChip(
-                            selected = hideDone,
-                            onClick = {
-                                val next = !hideDone
-                                vm.setHideDone(next)
-                                if (next) showDoneOnly = false
-                            },
-                            label = { Text("隐藏已完成") },
-                            modifier = Modifier.height(32.dp)
-                        )
-                        FilterChip(
-                            selected = showDoneOnly,
-                            onClick = {
-                                showDoneOnly = !showDoneOnly
-                                if (showDoneOnly && hideDone) vm.setHideDone(false)
-                            },
-                            label = { Text("只看已完成") },
-                            modifier = Modifier.height(32.dp)
-                        )
+                    IconButton(onClick = {
+                        collapsed.value = tree
+                            .filter { it.children.isNotEmpty() }
+                            .map { it.task.id }
+                            .toSet()
+                    }) {
+                        Icon(Icons.Filled.UnfoldLess, contentDescription = "全部折叠")
                     }
+                }
+            }
+            // v1.0.4：视图开关行 —— 「隐藏已完成」只看未完成，「只看已完成」回看做完的；
+            // 两个开关互斥（打开一个自动关掉另一个），持久化走 DataStore。
+            if (filtered.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = UiDimens.ListPad),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = hideDone,
+                        onClick = {
+                            val next = !hideDone
+                            vm.setHideDone(next)
+                            if (next) showDoneOnly = false
+                        },
+                        label = { Text("隐藏已完成") },
+                        modifier = Modifier.height(32.dp)
+                    )
+                    FilterChip(
+                        selected = showDoneOnly,
+                        onClick = {
+                            showDoneOnly = !showDoneOnly
+                            if (showDoneOnly && hideDone) vm.setHideDone(false)
+                        },
+                        label = { Text("只看已完成") },
+                        modifier = Modifier.height(32.dp)
+                    )
                 }
             }
 
@@ -650,6 +655,8 @@ private fun TaskEditDialog(
     var parentId by remember { mutableStateOf(initialParentId) }
     var showDatePicker by remember { mutableStateOf(false) }
     var parentPickerOpen by remember { mutableStateOf(false) }
+    // v1.0.5 QA：提交防重 —— 保存按钮在同一帧内被连点两次会重复落库，加一次性标志拦住
+    var submitted by remember { mutableStateOf(false) }
 
     val parentLabel = parentId?.let { id -> parentOptions.firstOrNull { it.id == id }?.title } ?: "无（作为顶层任务）"
 
@@ -658,13 +665,13 @@ private fun TaskEditDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (title.isNotBlank()) {
-                        onSubmit(
-                            title.trim(), due, note.takeIf { it.isNotBlank() }, status, parentId
-                        )
-                    }
+                    if (submitted || title.isBlank()) return@TextButton
+                    submitted = true
+                    onSubmit(
+                        title.trim(), due, note.takeIf { it.isNotBlank() }, status, parentId
+                    )
                 },
-                enabled = title.isNotBlank()
+                enabled = title.isNotBlank() && !submitted
             ) { Text("保存") }
         },
         dismissButton = {

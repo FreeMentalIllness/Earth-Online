@@ -417,16 +417,18 @@ private fun ItemDialog(
     var type by remember { mutableStateOf(initial?.type ?: "physical") }
     var desc by remember { mutableStateOf(initial?.description ?: "") }
     var category by remember { mutableStateOf(initial?.category) }
+    // v1.0.5 QA：提交防重（连点保存不再重复落库）
+    var submitted by remember { mutableStateOf(false) }
     AnimatedAlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (name.isNotBlank()) {
-                        onSubmit(name.trim(), type, desc.takeIf { it.isNotBlank() }, category)
-                    }
+                    if (submitted || name.isBlank()) return@TextButton
+                    submitted = true
+                    onSubmit(name.trim(), type, desc.takeIf { it.isNotBlank() }, category)
                 },
-                enabled = name.isNotBlank()
+                enabled = name.isNotBlank() && !submitted
             ) { Text("保存") }
         },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },
@@ -470,6 +472,8 @@ private fun CollectionDialog(
     var category by remember { mutableStateOf(initial?.category) }
     var fileUri by remember { mutableStateOf<Uri?>(null) }
     var fileName by remember { mutableStateOf<String?>(null) }
+    // v1.0.5 QA：提交防重（连点保存不再重复落库）
+    var submitted by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
@@ -487,11 +491,11 @@ private fun CollectionDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (title.isNotBlank()) {
-                        onSubmit(title.trim(), note.takeIf { it.isNotBlank() }, category, fileUri)
-                    }
+                    if (submitted || title.isBlank()) return@TextButton
+                    submitted = true
+                    onSubmit(title.trim(), note.takeIf { it.isNotBlank() }, category, fileUri)
                 },
-                enabled = title.isNotBlank()
+                enabled = title.isNotBlank() && !submitted
             ) { Text("保存") }
         },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },

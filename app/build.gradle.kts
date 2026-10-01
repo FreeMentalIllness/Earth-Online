@@ -27,8 +27,10 @@ android {
         // + 系统层启动图去掉图标（消除「地球」重影）。versionName 仍为 1.0.3，不跨端改动。
         // versionCode 21 = v1.0.4：头像壁纸清晰度提升 + 物品收藏可编辑 + 隐藏已完成开关等六项迭代，
         // + 深色强调色提亮与按钮前景对比度修复（三端设计规范 v1.0 收口）。
-        versionCode = 21
-        versionName = "1.0.4"
+        // versionCode 22 = v1.0.5：切换为正式签名（keystore 由 local.properties 注入 EO_STORE_FILE 等四字段），
+        // 与 v1.0.5 发布前准备对齐；内部版本号同步升至 1.0.5。
+        versionCode = 22
+        versionName = "1.0.5"
         vectorDrawables { useSupportLibrary = true }
         // 高德 SDK 需要原生 so 库，按需裁剪 ABI（阶段3 接入地图前可放行全部）
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
@@ -49,7 +51,7 @@ android {
         val keyPwd = localProps.getProperty("EO_KEY_PASSWORD")
         if (!listOf(storeFilePath, storePwd, keyAliasStr, keyPwd).any { it.isNullOrBlank() }) {
             create("release") {
-                storeFile = file(storeFilePath!!)
+                storeFile = rootProject.file(storeFilePath!!)
                 storePassword = storePwd!!
                 keyAlias = keyAliasStr!!
                 keyPassword = keyPwd!!
