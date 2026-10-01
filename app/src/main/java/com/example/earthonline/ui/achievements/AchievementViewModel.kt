@@ -45,7 +45,9 @@ class AchievementViewModel @Inject constructor(
     private val profileRepo: ProfileRepository,
     private val settings: SettingsDataStore,
     // v1.0.4：XP 流水（解锁成就落一条 ach 流水）
-    private val xpRepo: XpEventRepository
+    private val xpRepo: XpEventRepository,
+    // v1.0.5：成就解锁本地通知（跟随「到期提醒通知」总开关）
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context
 ) : ViewModel() {
 
     /** 成就行（引擎写入后由 Room 推回来） */
@@ -272,7 +274,10 @@ class AchievementViewModel @Inject constructor(
                         )
                         // v1.0.4：XP 流水（仅在「未解锁 -> 解锁」跳变时记一笔，回溯不改流水）
                         xpRepo.record("ach", XpRules.ACHIEVEMENT, "解锁成就：${rule.title}")
-                        if (!silent) _unlockEvents.tryEmit(unlockedRow)
+                        if (!silent) {
+                            _unlockEvents.tryEmit(unlockedRow)
+                            notifyUnlocked(unlockedRow)
+                        }
                     }
                 } else if (et != null && existing.unlockedAt != et) {
                     // 历史回溯：用真实事件时间覆盖「今天」误标的解锁时间
@@ -281,6 +286,19 @@ class AchievementViewModel @Inject constructor(
             }
         }
         return structureChanged
+    }
+
+    /** v1.0.5：解锁成功发一条本地通知（跟随通知总开关；失败静默不影响业务） */
+    private suspend fun notifyUnlocked(a: AchievementEntity) {
+        val enabled = runCatching { settings.notify.first() }.getOrElse { false }
+        if (!enabled) return
+        com.example.earthonline.reminder.AppNotifier.post(
+            appContext,
+            com.example.earthonline.reminder.AppNotifier.CHANNEL_ACH,
+            com.example.earthonline.reminder.AppNotifier.ID_ACH,
+            "🏆 解锁成就：${a.title}",
+            a.desc.ifBlank { "又迈过一道里程碑，继续加油！" }
+        )
     }
 
     /** 新增手动成就（默认未解锁，可指定分类） */
@@ -313,12 +331,12 @@ class AchievementViewModel @Inject constructor(
                 )
                 // v1.0.4：XP 流水（手动成就解锁也记一笔；撤销不回冲，保持流水单调）
                 xpRepo.record("ach", XpRules.ACHIEVEMENT, "解锁成就：${ach.title}")
+                notifyUnlocked(ach)
             }
         }
     }
 
-    /** 删除手动成就 */
-    fun deleteManual(ach: AchievementEntity) {
+    /** 删除手动成就 */    fun deleteManual(ach: AchievementEntity) {
         if (ach.type != "manual") return
         viewModelScope.launch { repo.delete(ach.id) }
     }

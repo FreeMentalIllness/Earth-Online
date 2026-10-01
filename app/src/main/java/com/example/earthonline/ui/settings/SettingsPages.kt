@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -337,6 +338,17 @@ fun GeneralRoute(
             }
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("数据管理", style = MaterialTheme.typography.labelMedium)
+                    SettingsNavItem(
+                        icon = Icons.Filled.DeleteOutline,
+                        label = "回收站",
+                        hint = "已删除内容保留 30 天，可随时恢复",
+                        onClick = { moreActions.onNavigate(Screen.RecycleBin.route) }
+                    )
+                }
+            }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("AI 对话", style = MaterialTheme.typography.labelMedium)
                     val cfg = vm.parseAiConfig(aiConfigJson)
                     Text(
@@ -400,6 +412,18 @@ fun BackupSyncRoute(
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText() ?: ""
                 vm.importJson(text)
                 snackbar.showSnackbar("已导入备份")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("导入失败：${e.message}")
+            }
+        }
+    }
+    // v1.0.5：CSV / Markdown 文本导入（任务表 / 日记）
+    val textImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText() ?: ""
+                snackbar.showSnackbar(vm.importTextFile(text))
             } catch (e: Exception) {
                 snackbar.showSnackbar("导入失败：${e.message}")
             }
@@ -648,6 +672,18 @@ fun BackupSyncRoute(
                     Text(
                         "导入采用按主键合并：同一条数据以备份为准，本地新增的部分保留（与网页端一致）。",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // v1.0.5：CSV / Markdown 文本导入（任务表 / 日记，增量合并去重）
+                    OutlinedButton(
+                        onClick = { textImportLauncher.launch(arrayOf("text/*", "text/csv", "text/markdown", "*/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("从 CSV / Markdown 导入") }
+                    Text(
+                        "任务 CSV 需含 title 列（可选 status、dueDate、note）；日志 CSV 需含 text 列（可选 type、createdAt）；" +
+                            "Markdown 日记用「# 2026-01-01」标题分日，每行一条。重复导入自动去重。",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -950,6 +986,21 @@ fun AboutRoute(
                         }
                         Text("检查更新")
                     }
+                    // v1.0.5：分享人生卡片长图（等级 / 连续 / 本月完成 / 关键词 / 签名）
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                runCatching {
+                                    val data = vm.lifeCardData()
+                                    com.example.earthonline.util.LifeCardRenderer.share(
+                                        context,
+                                        com.example.earthonline.util.LifeCardRenderer.render(context, data)
+                                    )
+                                }.onFailure { snackbar.showSnackbar("卡片生成失败：${it.message}") }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("📸 分享人生卡片") }
                 }
             }
         }

@@ -38,11 +38,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.SetSerializer
@@ -448,8 +448,15 @@ class HomeViewModel @Inject constructor(
                 combine(
                     taskRepo.search(q),
                     itemRepo.search(q),
-                    collectionRepo.search(q)
-                ) { tasks, items, cols -> buildHits(tasks, items, cols) }
+                    collectionRepo.search(q),
+                    memoRepo.search(q),
+                    achievementRepo.search(q)
+                ) { tasks, items, cols, memos, achs ->
+                    // 足迹搜索是日键表，单独流再合并
+                    locationRepo.search(q).first().let { locs ->
+                        buildHits(tasks, items, cols, memos, achs, locs)
+                    }
+                }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -457,9 +464,12 @@ class HomeViewModel @Inject constructor(
     private fun buildHits(
         tasks: List<TaskEntity>,
         items: List<ItemEntity>,
-        cols: List<CollectionEntity>
+        cols: List<CollectionEntity>,
+        memos: List<MemoEntity> = emptyList(),
+        achs: List<AchievementEntity> = emptyList(),
+        locs: List<LocationEntity> = emptyList()
     ): List<SearchHit> {
-        val out = ArrayList<SearchHit>(tasks.size + items.size + cols.size)
+        val out = ArrayList<SearchHit>(tasks.size + items.size + cols.size + memos.size + achs.size + locs.size)
         tasks.take(8).forEach { t ->
             out += SearchHit(
                 key = "task-${t.id}", kind = "task", route = "tasks", icon = "📋",
@@ -482,6 +492,28 @@ class HomeViewModel @Inject constructor(
                 key = "col-${c.id}", kind = "collection", route = "collections", icon = "💗",
                 title = c.title.ifBlank { "(未命名收藏)" },
                 sub = c.note?.takeIf { it.isNotBlank() } ?: (c.category?.takeIf { it.isNotBlank() } ?: "未分类")
+            )
+        }
+        // v1.0.5：搜索范围扩展到世界日志 / 成就 / 足迹
+        memos.take(6).forEach { m ->
+            out += SearchHit(
+                key = "memo-${m.id}", kind = "memo", route = "home", icon = "💡",
+                title = m.text.take(40).ifBlank { "(空白灵感)" },
+                sub = when (m.type) { "idea" -> "灵感"; "important" -> "重要"; else -> "日志" }
+            )
+        }
+        achs.take(6).forEach { a ->
+            out += SearchHit(
+                key = "ach-${a.id}", kind = "achievement", route = "achievements", icon = "🏆",
+                title = a.title.ifBlank { "(未命名成就)" },
+                sub = if (a.unlocked) "已解锁" else "未解锁 · ${a.desc.take(20)}"
+            )
+        }
+        locs.take(6).forEach { l ->
+            out += SearchHit(
+                key = "loc-${l.id}", kind = "location", route = "map", icon = "📍",
+                title = l.name.ifBlank { "(未命名足迹)" },
+                sub = l.date.takeIf { it.isNotBlank() }?.let { "到访 $it" } ?: "足迹"
             )
         }
         return out

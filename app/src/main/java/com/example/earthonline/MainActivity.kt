@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,7 @@ import com.example.earthonline.util.openUrlInBrowser
 import com.example.earthonline.widget.OverviewWidget
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -63,8 +66,15 @@ class MainActivity : ComponentActivity() {
     // v1.0.5：APK 下载 + 引导安装（与「关于」页共用同一单例）
     @Inject lateinit var installer: ApkInstaller
 
-    /** 启动检查发现的新版本（非空 = 弹更新提示；用户点「稍后」本次启动不再打扰） */
+    // v1.0.5 灵感接力：转待办需要读写灵感与任务
+    @Inject lateinit var taskRepo: com.example.earthonline.data.repository.TaskRepository
+    @Inject lateinit var memoRepo: com.example.earthonline.data.repository.MemoRepository
+
+    // v1.0.5：启动检查到新版本（非空 = 弹更新提示；用户点「稍后」本次启动不再打扰）
     private var startupUpdate by mutableStateOf<UpdateInfo?>(null)
+
+    // v1.0.5 灵感接力：点通知进入 App 后弹「转待办」面板
+    private var inspirePending by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Android 12+ SplashScreen API：清单已设 Theme.EarthOnline.Splash（postSplashScreenTheme 指回主主题）
@@ -85,6 +95,8 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { !contentReady }
 
         startRoute = intent?.getStringExtra(EXTRA_ROUTE) ?: Screen.Home.route
+        // v1.0.5 灵感接力：通知点击带 inspire extra
+        if (intent?.getBooleanExtra(EXTRA_INSPIRE, false) == true) inspirePending = true
 
         setContent {
             EarthOnlineAppRoot(onReady = { contentReady = true }, startRoute = startRoute)
@@ -94,6 +106,10 @@ class MainActivity : ComponentActivity() {
                 installer = installer,
                 onDismiss = { startupUpdate = null }
             )
+            // v1.0.5 灵感接力：转待办面板
+            if (inspirePending) {
+                InspireDialog(taskRepo = taskRepo, memoRepo = memoRepo, onDismiss = { inspirePending = false })
+            }
         }
 
         // v1.0.5：启动 3 秒后静默检查更新（避开首帧渲染高峰）；
@@ -114,6 +130,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         startRoute = intent.getStringExtra(EXTRA_ROUTE) ?: Screen.Home.route
+        if (intent.getBooleanExtra(EXTRA_INSPIRE, false)) inspirePending = true
     }
 
     override fun onPause() {
@@ -127,7 +144,80 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** 小组件 / 通知等外部入口指定落地页面的 key（值 = Screen 的 route） */
         const val EXTRA_ROUTE = "route"
+
+        /** v1.0.5 灵感接力通知点击标记 */
+        const val EXTRA_INSPIRE = "inspire"
     }
+}
+
+/**
+ * v1.0.5 灵感接力面板：列出最近的灵感（世界日志），点「转待办」写入 To Do 分类。
+ */
+@Composable
+private fun InspireDialog(
+    taskRepo: com.example.earthonline.data.repository.TaskRepository,
+    memoRepo: com.example.earthonline.data.repository.MemoRepository,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var memos by remember { mutableStateOf<List<com.example.earthonline.data.local.entity.MemoEntity>>(emptyList()) }
+    var converted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        memos = runCatching { memoRepo.observeRecent(10).first() }.getOrElse { emptyList() }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("💡 跨端灵感接力") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    if (converted) "已转为待办，去任务页的 To Do 分类看看吧"
+                    else "最近的灵感，点「转待办」放进 To Do：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (memos.isEmpty()) {
+                    Text("还没有灵感记录", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .heightIn(max = 260.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        memos.forEach { m ->
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text(
+                                    m.text.take(40),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        runCatching {
+                                            taskRepo.insert(
+                                                com.example.earthonline.data.local.entity.TaskEntity(
+                                                    id = "task_${System.currentTimeMillis()}",
+                                                    category = "todo",
+                                                    title = m.text.take(80),
+                                                    createdAt = com.example.earthonline.util.todayStr(),
+                                                    lastModified = com.example.earthonline.util.todayStr()
+                                                )
+                                            )
+                                        }
+                                        converted = true
+                                    }
+                                }) { Text("转待办") }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("稍后处理") } }
+    )
 }
 
 /**

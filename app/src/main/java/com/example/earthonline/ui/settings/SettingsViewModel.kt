@@ -15,6 +15,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -42,6 +43,12 @@ class SettingsViewModel @Inject constructor(
     private val updateRepo: UpdateRepository,
     // v1.0.5：APK 下载 + 引导安装（与启动更新弹窗共用同一应用级单例）
     val installer: com.example.earthonline.util.ApkInstaller,
+    // v1.0.5：CSV / Markdown 文本导入
+    private val textImporter: com.example.earthonline.data.backup.TextImportParser,
+    private val taskDao: com.example.earthonline.data.local.dao.TaskDao,
+    private val memoDao: com.example.earthonline.data.local.dao.MemoDao,
+    // v1.0.5：分享人生卡片数据源
+    private val profileRepo: com.example.earthonline.data.repository.ProfileRepository,
     // v1.0.5 清空数据：记忆相册原图文件清理
     private val memoryPhotoStore: com.example.earthonline.data.photos.MemoryPhotoStore
 ) : ViewModel() {
@@ -146,6 +153,44 @@ class SettingsViewModel @Inject constructor(
      * 恢复多设备同步。直接复用 push(force=true) —— 与 Web 端 webdavUploadBackup 等价。
      */
     suspend fun resyncToCloud(): String = cloudSync.push(force = true).message
+
+    /** v1.0.5：CSV / Markdown 文本文件导入（增量 REPLACE，重复导入自动去重） */
+    suspend fun importTextFile(content: String): String =
+        runCatching { textImporter.import(content, taskDao, memoDao).message }
+            .getOrElse { "导入失败：${it.message ?: "文件内容无法解析"}" }
+
+    /**
+     * v1.0.5：分享人生卡片数据（关于页入口）。
+     * 口径独立自洽：等级=周岁（lifeStatsOf）；连续天数=本月完成日键的当月连续段；
+     * 本月关键词=本月完成任务标题的前缀词去重。
+     */
+    suspend fun lifeCardData(): com.example.earthonline.util.LifeCardRenderer.CardData {
+        val profile = profileRepo.get()
+        val life = com.example.earthonline.util.lifeStatsOf(profile?.birthDate)
+        val now = java.time.LocalDate.now()
+        val monthStart = "$now".take(8) + "01" + "T00:00:00Z"
+        val done = taskDao.observeAll().first()
+            .filter { it.status == "done" && (it.doneAt ?: "") >= monthStart }
+        // 连续天数：从今天往回数，完成日键连续段（今天没完成从昨天起算，不惩罚）
+        val days = done.mapNotNull { it.doneAt?.take(10) }.toSet()
+        var streak = 0
+        var cursor = now
+        if (cursor.toString() !in days) cursor = cursor.minusDays(1)
+        while (cursor.toString() in days) { streak++; cursor = cursor.minusDays(1) }
+        val keywords = done.map { it.title.trim() }
+            .filter { it.length >= 2 }
+            .map { if (it.length > 4) it.take(4) else it }
+            .distinct()
+            .take(5)
+        return com.example.earthonline.util.LifeCardRenderer.CardData(
+            name = profile?.name.orEmpty(),
+            signature = profile?.signature.orEmpty(),
+            level = life.age,
+            streakDays = streak,
+            monthDone = done.size,
+            keywords = keywords
+        )
+    }
 
     /* ---------------- v1.2.1：应用内检查更新 ---------------- */
 

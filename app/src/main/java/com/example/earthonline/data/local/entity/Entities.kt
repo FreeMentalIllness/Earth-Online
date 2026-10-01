@@ -104,6 +104,12 @@ data class TaskEntity(
     val createdAt: String = "",           // YYYY-MM-DD
     val lastModified: String = "",        // YYYY-MM-DD
     val doneAt: String? = null,          // 最近一次完成时间 ISO；非 done 时为 null（完成任务数唯一口径）
+    /**
+     * v1.0.5 回收站：软删时间（DB 6->7 新增列，ISO 字符串，null=未删除）。
+     * 四端契约（Android canonical）：字段名 deletedAt；软删行【不导出】WebDAV 备份，
+     * 回收站内容永不跨端 —— WebDAV 按主键合并语义零改动。30 天后启动时物理清理。
+     */
+    val deletedAt: String? = null,
     @ColumnInfo(name = "sort_order") val order: Int = 0
 )
 
@@ -114,7 +120,8 @@ data class MemoEntity(
     @PrimaryKey val id: String,
     val text: String = "",
     val type: String = "note",           // note / important / idea
-    val createdAt: String = ""           // ISO
+    val createdAt: String = "",           // ISO
+    val deletedAt: String? = null         // v1.0.5 回收站：软删时间 ISO；null=未删除
 )
 
 /** 背包物品（对应 HTML state.items） */
@@ -126,7 +133,8 @@ data class ItemEntity(
     val type: String = "physical",       // virtual / physical（兼容字段）
     val description: String? = null,
     val category: String? = null,        // 自定义分类 id 或空
-    val createdAt: String = ""           // YYYY-MM-DD
+    val createdAt: String = "",           // YYYY-MM-DD
+    val deletedAt: String? = null         // v1.0.5 回收站：软删时间 ISO；null=未删除
 )
 
 /** 成就（自动 + 手动；对应 HTML state.achievements） */
@@ -155,7 +163,8 @@ data class CollectionEntity(
     val note: String? = null,
     val fileMetaJson: String? = null,    // {name,mime,size} 元信息 JSON
     val fileUri: String? = null,         // 沙盒内持久化文件的 Uri（替代 HTML 会话内 Blob）
-    val createdAt: String = ""           // YYYY-MM-DD
+    val createdAt: String = "",           // YYYY-MM-DD
+    val deletedAt: String? = null         // v1.0.5 回收站：软删时间 ISO；null=未删除
 )
 
 /** 足迹地图坐标（对应 HTML state.locations） */

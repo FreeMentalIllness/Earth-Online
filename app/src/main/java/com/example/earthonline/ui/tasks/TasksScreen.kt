@@ -1,10 +1,12 @@
 package com.example.earthonline.ui.tasks
 
+import android.content.Intent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
@@ -102,6 +104,9 @@ fun TasksScreen(
     var editing by remember { mutableStateOf<TaskEntity?>(null) }
     // v1.2.3：「已完成」视图开关，便于回溯已经做完的任务
     var showDoneOnly by remember { mutableStateOf(false) }
+    // v1.0.5 批量操作：多选模式（工具行「多选」进入；点卡片勾选；退出时清空选择）
+    var selectMode by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateOf(setOf<String>()) }
 
     val filtered = remember(allTasks, category) { allTasks.filter { it.category == category } }
     // v1.0.4：「只看已完成 / 隐藏已完成」在建树前过滤源列表 ——
@@ -246,6 +251,76 @@ fun TasksScreen(
                         label = { Text("只看已完成") },
                         modifier = Modifier.height(32.dp)
                     )
+                    // v1.0.5：批量操作入口 —— 长按已被拖拽排序占用，改用「多选」chip 进入
+                    FilterChip(
+                        selected = selectMode,
+                        onClick = {
+                            selectMode = !selectMode
+                            if (!selectMode) selected.value = emptySet()
+                        },
+                        label = { Text("多选") },
+                        modifier = Modifier.height(32.dp)
+                    )
+                }
+                // v1.0.5 批量操作栏：完成 / 删除（进回收站）/ 导出 / 全选
+                if (selectMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = UiDimens.ListPad, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "已选 ${selected.value.size} 项",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = {
+                            selected.value =
+                                if (selected.value.size == visible.size) emptySet()
+                                else visible.map { it.task.id }.toSet()
+                        }) {
+                            Text(if (selected.value.size == visible.size) "取消全选" else "全选")
+                        }
+                        TextButton(
+                            enabled = selected.value.isNotEmpty(),
+                            onClick = {
+                                visible.filter { it.task.id in selected.value && it.task.status != "done" }
+                                    .forEach { vm.toggleDone(it.task) }
+                            }
+                        ) { Text("完成") }
+                        TextButton(
+                            enabled = selected.value.isNotEmpty(),
+                            onClick = {
+                                // 批量删除同样走回收站（软删），30 天内可到回收站恢复
+                                visible.filter { it.task.id in selected.value }
+                                    .forEach { vm.deleteCascade(it.task.id) }
+                                selected.value = emptySet()
+                            }
+                        ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                        TextButton(
+                            enabled = selected.value.isNotEmpty(),
+                            onClick = {
+                                val text = visible
+                                    .filter { it.task.id in selected.value }
+                                    .joinToString("\n") { n ->
+                                        val t = n.task
+                                        val mark = if (t.status == "done") "x" else " "
+                                        val note = t.note?.let { "（$it）" } ?: ""
+                                        "- [$mark] ${t.title}$note"
+                                    }
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, text)
+                                }
+                                runCatching {
+                                    ctx.startActivity(Intent.createChooser(send, "导出任务"))
+                                }
+                            }
+                        ) { Text("导出") }
+                    }
                 }
             }
 
@@ -355,6 +430,13 @@ fun TasksScreen(
                             collapsed = collapsed.value.contains(node.task.id),
                             celebrate = celebrateId == node.task.id,
                             combo = combo,
+                            selectMode = selectMode,
+                            selected = node.task.id in selected.value,
+                            onToggleSelect = {
+                                val id = node.task.id
+                                selected.value = if (id in selected.value)
+                                    selected.value - id else selected.value + id
+                            },
                             onToggleCollapse = {
                                 val id = node.task.id
                                 collapsed.value = if (collapsed.value.contains(id))
@@ -465,6 +547,9 @@ private fun TaskRow(
     collapsed: Boolean,
     celebrate: Boolean,
     combo: Int,
+    selectMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
     onToggleCollapse: () -> Unit,
     onToggleDone: () -> Unit,
     onSetProgress: (Int) -> Unit,
@@ -490,7 +575,13 @@ private fun TaskRow(
         Card(
             modifier = Modifier
                 .weight(1f)
-                .clickable { onEdit() }
+                .clickable { if (selectMode) onToggleSelect() else onEdit() }
+                // v1.0.5：多选模式下选中项高亮描边
+                .then(
+                    if (selected) Modifier.border(
+                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(UiDimens.ItemRadius)
+                    ) else Modifier
+                )
                 .drawWithContent {
                     drawContent()
                     if (glow.value > 0f) {

@@ -27,23 +27,25 @@ interface ProfileDao {
 
 @Dao
 interface TaskDao {
-    @Query("SELECT * FROM tasks ORDER BY sort_order ASC")
+    /* v1.0.5 回收站：所有常规读取统一过滤软删行（deletedAt IS NULL）；
+       回收站专用查询见文件尾注释同段。 */
+    @Query("SELECT * FROM tasks WHERE deletedAt IS NULL ORDER BY sort_order ASC")
     fun observeAll(): Flow<List<TaskEntity>>
 
-    @Query("SELECT * FROM tasks WHERE parentId IS NULL ORDER BY sort_order ASC")
+    @Query("SELECT * FROM tasks WHERE parentId IS NULL AND deletedAt IS NULL ORDER BY sort_order ASC")
     fun observeRoots(): Flow<List<TaskEntity>>
 
-    @Query("SELECT * FROM tasks WHERE parentId = :pid ORDER BY sort_order ASC")
+    @Query("SELECT * FROM tasks WHERE parentId = :pid AND deletedAt IS NULL ORDER BY sort_order ASC")
     fun observeChildren(pid: String): Flow<List<TaskEntity>>
 
-    @Query("SELECT COUNT(*) FROM tasks")
+    @Query("SELECT COUNT(*) FROM tasks WHERE deletedAt IS NULL")
     fun count(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM tasks WHERE doneAt IS NOT NULL")
+    @Query("SELECT COUNT(*) FROM tasks WHERE doneAt IS NOT NULL AND deletedAt IS NULL")
     fun doneCount(): Flow<Int>
 
     /** 人生时间轴：最近完成的任务（限量，避免首页加载全表） */
-    @Query("SELECT * FROM tasks WHERE doneAt IS NOT NULL ORDER BY doneAt DESC LIMIT :limit")
+    @Query("SELECT * FROM tasks WHERE doneAt IS NOT NULL AND deletedAt IS NULL ORDER BY doneAt DESC LIMIT :limit")
     fun observeDoneRecent(limit: Int): Flow<List<TaskEntity>>
 
     /* ---------------- v1.0.0：周期性报告（日报 / 周报 / 年报） ----------------
@@ -52,13 +54,13 @@ interface TaskDao {
        所以可以直接用字符串比较，不需要在 SQL 里做日期转换（SQLite 也没有本地时区概念）。 */
 
     @Query(
-        "SELECT COUNT(*) FROM tasks WHERE doneAt IS NOT NULL " +
+        "SELECT COUNT(*) FROM tasks WHERE doneAt IS NOT NULL AND deletedAt IS NULL " +
             "AND doneAt >= :from AND doneAt < :to"
     )
     fun doneCountBetween(from: String, to: String): Flow<Int>
 
     @Query(
-        "SELECT * FROM tasks WHERE doneAt IS NOT NULL " +
+        "SELECT * FROM tasks WHERE doneAt IS NOT NULL AND deletedAt IS NULL " +
             "AND doneAt >= :from AND doneAt < :to ORDER BY doneAt DESC LIMIT :limit"
     )
     fun doneBetween(from: String, to: String, limit: Int): Flow<List<TaskEntity>>
@@ -70,10 +72,34 @@ interface TaskDao {
      * NULL LIKE '%x%' 在 SQLite 里结果是 NULL（不是 false），整条会被静默漏掉。
      */
     @Query(
-        "SELECT * FROM tasks WHERE title LIKE '%' || :q || '%' " +
-            "OR IFNULL(note, '') LIKE '%' || :q || '%' ORDER BY sort_order ASC LIMIT 20"
+        "SELECT * FROM tasks WHERE deletedAt IS NULL AND (title LIKE '%' || :q || '%' " +
+            "OR IFNULL(note, '') LIKE '%' || :q || '%') ORDER BY sort_order ASC LIMIT 20"
     )
     fun search(q: String): Flow<List<TaskEntity>>
+
+    /* ---------------- v1.0.5 回收站 ---------------- */
+
+    /** 软删单条（幂等：已软删的不刷新时间戳） */
+    @Query("UPDATE tasks SET deletedAt = :ts WHERE id = :id AND deletedAt IS NULL")
+    suspend fun softDelete(id: String, ts: String)
+
+    /** 级联软删子任务（与父任务同批时间戳，恢复时按父恢复） */
+    @Query("UPDATE tasks SET deletedAt = :ts WHERE parentId = :pid AND deletedAt IS NULL")
+    suspend fun softDeleteChildren(pid: String, ts: String)
+
+    @Query("SELECT * FROM tasks WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeRecycled(): Flow<List<TaskEntity>>
+
+    @Query("UPDATE tasks SET deletedAt = NULL WHERE id = :id")
+    suspend fun restore(id: String)
+
+    /** 恢复时连带子任务（只恢复仍处于软删态的） */
+    @Query("UPDATE tasks SET deletedAt = NULL WHERE parentId = :pid AND deletedAt IS NOT NULL")
+    suspend fun restoreChildren(pid: String)
+
+    /** 30 天到期物理清理（ISO 串字典序即时间序） */
+    @Query("DELETE FROM tasks WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun purgeExpired(cutoff: String)
 
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun get(id: String): TaskEntity?
@@ -97,26 +123,45 @@ interface TaskDao {
 
 @Dao
 interface MemoDao {
-    @Query("SELECT * FROM memos ORDER BY createdAt DESC")
+    @Query("SELECT * FROM memos WHERE deletedAt IS NULL ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<MemoEntity>>
 
     /** 首页只取最近 N 条，不再把全表拉进内存 */
-    @Query("SELECT * FROM memos ORDER BY createdAt DESC LIMIT :limit")
+    @Query("SELECT * FROM memos WHERE deletedAt IS NULL ORDER BY createdAt DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<MemoEntity>>
 
-    @Query("SELECT COUNT(*) FROM memos")
+    @Query("SELECT COUNT(*) FROM memos WHERE deletedAt IS NULL")
     fun count(): Flow<Int>
 
     /** v1.0.0：区间内新增灵感数（报告用，左闭右开） */
-    @Query("SELECT COUNT(*) FROM memos WHERE createdAt >= :from AND createdAt < :to")
+    @Query("SELECT COUNT(*) FROM memos WHERE deletedAt IS NULL AND createdAt >= :from AND createdAt < :to")
     fun countBetween(from: String, to: String): Flow<Int>
 
     /** v1.0.0：区间内灵感明细（报告图表按小时/天/月聚合用） */
     @Query(
-        "SELECT * FROM memos WHERE createdAt >= :from AND createdAt < :to " +
+        "SELECT * FROM memos WHERE deletedAt IS NULL AND createdAt >= :from AND createdAt < :to " +
             "ORDER BY createdAt DESC LIMIT :limit"
     )
     fun between(from: String, to: String, limit: Int): Flow<List<MemoEntity>>
+
+    /** v1.0.5 全局搜索：日志正文模糊匹配（含 type） */
+    @Query(
+        "SELECT * FROM memos WHERE deletedAt IS NULL AND text LIKE '%' || :q || '%' " +
+            "ORDER BY createdAt DESC LIMIT 20"
+    )
+    fun search(q: String): Flow<List<MemoEntity>>
+
+    /* ---------------- v1.0.5 回收站 ---------------- */
+    @Query("UPDATE memos SET deletedAt = :ts WHERE id = :id AND deletedAt IS NULL")
+    suspend fun softDelete(id: String, ts: String)
+    @Query("SELECT * FROM memos WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeRecycled(): Flow<List<MemoEntity>>
+
+    @Query("UPDATE memos SET deletedAt = NULL WHERE id = :id")
+    suspend fun restore(id: String)
+
+    @Query("DELETE FROM memos WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun purgeExpired(cutoff: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(m: MemoEntity)
@@ -131,26 +176,39 @@ interface MemoDao {
 
 @Dao
 interface ItemDao {
-    @Query("SELECT * FROM items ORDER BY createdAt DESC")
+    @Query("SELECT * FROM items WHERE deletedAt IS NULL ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<ItemEntity>>
 
-    @Query("SELECT COUNT(*) FROM items")
+    @Query("SELECT COUNT(*) FROM items WHERE deletedAt IS NULL")
     fun count(): Flow<Int>
 
     /** v1.2.1 全局搜索：物品名 / 描述模糊匹配 */
     @Query(
-        "SELECT * FROM items WHERE name LIKE '%' || :q || '%' " +
-            "OR IFNULL(description, '') LIKE '%' || :q || '%' ORDER BY createdAt DESC LIMIT 20"
+        "SELECT * FROM items WHERE deletedAt IS NULL AND (name LIKE '%' || :q || '%' " +
+            "OR IFNULL(description, '') LIKE '%' || :q || '%') ORDER BY createdAt DESC LIMIT 20"
     )
     fun search(q: String): Flow<List<ItemEntity>>
 
     /** 已使用的自定义分类数（首页概览卡「分类 N」） */
-    @Query("SELECT COUNT(DISTINCT category) FROM items WHERE category IS NOT NULL AND category != ''")
+    @Query("SELECT COUNT(DISTINCT category) FROM items WHERE deletedAt IS NULL AND category IS NOT NULL AND category != ''")
     fun categoryCount(): Flow<Int>
 
     /** v1.0.3 报告：区间内拾取的物品数（createdAt 是 YYYY-MM-DD 日键，闭区间） */
-    @Query("SELECT COUNT(*) FROM items WHERE createdAt >= :fromDay AND createdAt <= :toDay")
+    @Query("SELECT COUNT(*) FROM items WHERE deletedAt IS NULL AND createdAt >= :fromDay AND createdAt <= :toDay")
     fun countBetweenDays(fromDay: String, toDay: String): Flow<Int>
+
+    /* ---------------- v1.0.5 回收站 ---------------- */
+    @Query("UPDATE items SET deletedAt = :ts WHERE id = :id AND deletedAt IS NULL")
+    suspend fun softDelete(id: String, ts: String)
+
+    @Query("SELECT * FROM items WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeRecycled(): Flow<List<ItemEntity>>
+
+    @Query("UPDATE items SET deletedAt = NULL WHERE id = :id")
+    suspend fun restore(id: String)
+
+    @Query("DELETE FROM items WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun purgeExpired(cutoff: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(i: ItemEntity)
@@ -178,6 +236,13 @@ interface ItemDao {
 interface AchievementDao {
     @Query("SELECT * FROM achievements ORDER BY type ASC, title ASC")
     fun observeAll(): Flow<List<AchievementEntity>>
+
+    /** v1.0.5 全局搜索：成就标题 / 描述模糊匹配（含未解锁） */
+    @Query(
+        "SELECT * FROM achievements WHERE title LIKE '%' || :q || '%' " +
+            "OR desc LIKE '%' || :q || '%' ORDER BY unlocked DESC, title ASC LIMIT 20"
+    )
+    fun search(q: String): Flow<List<AchievementEntity>>
 
     @Query("SELECT COUNT(*) FROM achievements WHERE unlocked = 1")
     fun unlockedCount(): Flow<Int>
@@ -222,18 +287,31 @@ interface AchievementDao {
 
 @Dao
 interface CollectionDao {
-    @Query("SELECT * FROM collections ORDER BY createdAt DESC")
+    @Query("SELECT * FROM collections WHERE deletedAt IS NULL ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<CollectionEntity>>
 
-    @Query("SELECT COUNT(*) FROM collections")
+    @Query("SELECT COUNT(*) FROM collections WHERE deletedAt IS NULL")
     fun count(): Flow<Int>
 
     /** v1.2.1 全局搜索：收藏标题 / 备注模糊匹配 */
     @Query(
-        "SELECT * FROM collections WHERE title LIKE '%' || :q || '%' " +
-            "OR IFNULL(note, '') LIKE '%' || :q || '%' ORDER BY createdAt DESC LIMIT 20"
+        "SELECT * FROM collections WHERE deletedAt IS NULL AND (title LIKE '%' || :q || '%' " +
+            "OR IFNULL(note, '') LIKE '%' || :q || '%') ORDER BY createdAt DESC LIMIT 20"
     )
     fun search(q: String): Flow<List<CollectionEntity>>
+
+    /* ---------------- v1.0.5 回收站 ---------------- */
+    @Query("UPDATE collections SET deletedAt = :ts WHERE id = :id AND deletedAt IS NULL")
+    suspend fun softDelete(id: String, ts: String)
+
+    @Query("SELECT * FROM collections WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeRecycled(): Flow<List<CollectionEntity>>
+
+    @Query("UPDATE collections SET deletedAt = NULL WHERE id = :id")
+    suspend fun restore(id: String)
+
+    @Query("DELETE FROM collections WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun purgeExpired(cutoff: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(c: CollectionEntity)
@@ -261,6 +339,14 @@ interface CollectionDao {
 interface LocationDao {
     @Query("SELECT * FROM locations ORDER BY date DESC")
     fun observeAll(): Flow<List<LocationEntity>>
+
+    /** v1.0.5 全局搜索：足迹名称 / 备注 / 标签模糊匹配 */
+    @Query(
+        "SELECT * FROM locations WHERE name LIKE '%' || :q || '%' " +
+            "OR IFNULL(note, '') LIKE '%' || :q || '%' " +
+            "OR IFNULL(tagsJson, '') LIKE '%' || :q || '%' ORDER BY date DESC LIMIT 20"
+    )
+    fun search(q: String): Flow<List<LocationEntity>>
 
     @Query("SELECT * FROM locations ORDER BY date DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<LocationEntity>>

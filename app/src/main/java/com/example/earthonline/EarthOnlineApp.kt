@@ -35,6 +35,9 @@ class EarthOnlineApp : Application(), Configuration.Provider {
     /** v1.0.0：桌面小组件刷新调度（表变更防抖后推一次 RemoteViews） */
     @Inject lateinit var widgetUpdates: WidgetUpdateDispatcher
 
+    /** v1.0.5：回收站 30 天到期物理清理（启动触发点，另一处在打开回收站页时） */
+    @Inject lateinit var recycleBin: com.example.earthonline.data.repository.RecycleBinRepository
+
     /**
      * 用 Hilt 的 WorkerFactory 构造 WorkManager 配置。
      * 必须用 getter（首次访问时才求值），否则会在构造期早于 Hilt 注入时读到未初始化的 workerFactory。
@@ -57,6 +60,8 @@ class EarthOnlineApp : Application(), Configuration.Provider {
         scope.launch {
             val enabled = runCatching { settings.notify.first() }.getOrElse { false }
             if (enabled) ReminderScheduler.schedule(this@EarthOnlineApp)
+            // v1.0.5：启动即清理回收站中软删超过 30 天的行（ISO 串字典序比较）
+            runCatching { recycleBin.purgeExpired(purgeCutoffIso()) }
         }
         // v1.2.1：本地自动备份 —— 注册 Room 表变更监听（幂等，内部有 started 标志）
         autoBackup.start()
@@ -64,5 +69,13 @@ class EarthOnlineApp : Application(), Configuration.Provider {
         widgetUpdates.start()
         // WebDAV 自动同步：首个 Activity 启动（= 冷启动/回前台）→ 拉取；全部退到后台 → 推送
         registerActivityLifecycleCallbacks(AppForegroundTracker(cloudSync))
+    }
+
+    /** 30 天前的 UTC ISO 时间戳（与软删 deletedAt 同格式，字典序即时间序） */
+    private fun purgeCutoffIso(): String {
+        val cal = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -30) }
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+        fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        return fmt.format(cal.time)
     }
 }

@@ -39,7 +39,10 @@ class CloudSyncManager @Inject constructor(
     private val settings: SettingsDataStore,
     private val backupRepo: BackupRepository,
     private val webDav: WebDavService,
-    private val json: Json
+    private val json: Json,
+    // v1.0.5：灵感接力（拉到新灵感 → 本地通知）
+    private val memoRepo: com.example.earthonline.data.repository.MemoRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context
 ) {
 
     companion object {
@@ -97,9 +100,14 @@ class CloudSyncManager @Inject constructor(
             if (remoteAt <= localAt) {
                 return@withLock SyncResult(true, "云端无更新", changed = false)
             }
+            // v1.0.5：灵感接力 —— 拉取前先记本地已有 memo id，导入后比对出「跨端新灵感」，
+            // 有新增则发本地通知（点击进 App 提供转待办）。
+            val localMemoIds = runCatching { memoRepo.observeAll().first().map { it.id }.toSet() }
+                .getOrElse { emptySet() }
             runCatching { backupRepo.importJson(text) }
                 .getOrElse { return@withLock SyncResult(false, "本地写入失败：${it.message}") }
             settings.setLastSyncAt(remote.exportedAt)
+            notifySyncResult(remote, remote.memos.filter { it.id !in localMemoIds })
             SyncResult(true, "已拉取云端最新数据", changed = true)
         }
     }
@@ -151,6 +159,35 @@ class CloudSyncManager @Inject constructor(
         if (raw.isBlank()) return null
         val cfg = runCatching { json.decodeFromString<WebDavConfig>(raw) }.getOrNull() ?: return null
         return if (cfg.url.isBlank()) null else cfg
+    }
+
+    /**
+     * v1.0.5：拉取成功后的本地通知（跟随「到期提醒通知」总开关，默认用户关了就不吵）。
+     *  - 有跨端新灵感 → 「灵感接力」通知，点击进 App 转待办（MainActivity 消费 extra）；
+     *  - 无灵感但确有更新 → 轻量「同步完成」通知（一条，不逐项罗列）。
+     */
+    private suspend fun notifySyncResult(remote: BackupRepository.Payload, newMemos: List<com.example.earthonline.data.local.entity.MemoEntity>) {
+        val enabled = runCatching { settings.notify.first() }.getOrDefault(false)
+        if (!enabled) return
+        val N = com.example.earthonline.reminder.AppNotifier
+        if (newMemos.isNotEmpty()) {
+            val first = newMemos.first().text.take(60)
+            val intent = android.content.Intent(appContext, com.example.earthonline.MainActivity::class.java).apply {
+                putExtra("inspire", true)
+            }
+            N.post(
+                appContext, N.CHANNEL_SYNC, N.ID_INSPIRE_BASE,
+                "💡 跨端灵感接力（${newMemos.size} 条）",
+                first + if (newMemos.size > 1) " 等 ${newMemos.size} 条新灵感已同步，点击转为待办" else " 已同步，点击转为待办",
+                intent
+            )
+        } else {
+            N.post(
+                appContext, N.CHANNEL_SYNC, N.ID_SYNC,
+                "地球Online · 同步完成",
+                "已拉取云端最新数据（${remote.exportedAt.take(16).replace('T', ' ')}）"
+            )
+        }
     }
 
     private fun davOf(c: WebDavConfig) = WebDavService.DavConfig(c.url, c.user, c.pass)

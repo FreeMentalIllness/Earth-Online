@@ -93,8 +93,23 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
 }
 
 /**
+ * v6 -> v7：回收站（v1.0.5）。
+ * tasks / memos / items / collections 四表各加 deletedAt TEXT 列（可空，null=未删除）。
+ * 注意：任务书里的 5->6 已被 v1.0.4 XP 迁移占用，回收站顺延为 6->7。
+ * 四端契约（Android canonical）：软删行不导出 WebDAV 备份，回收站永不跨端。
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `deletedAt` TEXT")
+        db.execSQL("ALTER TABLE `memos` ADD COLUMN `deletedAt` TEXT")
+        db.execSQL("ALTER TABLE `items` ADD COLUMN `deletedAt` TEXT")
+        db.execSQL("ALTER TABLE `collections` ADD COLUMN `deletedAt` TEXT")
+    }
+}
+
+/**
  * 主数据库（对应 HTML 的单一主存档键 `earth_data`，本端归一化为多表）。
- * version=6；迁移链 MIGRATION_1_2 / MIGRATION_2_3 / MIGRATION_3_4 / MIGRATION_4_5 / MIGRATION_5_6
+ * version=7；迁移链 MIGRATION_1_2 … MIGRATION_6_7
  *（fallbackToDestructiveMigration 仅作无匹配迁移时的兜底）。
  */
 @Database(
@@ -110,7 +125,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         BagCategoryEntity::class,
         XpEventEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -138,7 +153,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DB_NAME
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }
