@@ -13,3 +13,7 @@ local.properties
 *.jks
 *.keystore
 keystore/
+
+# 构建日志与签名配置辅助脚本（本地保留，不入库）
+build_release.log
+setup_release_signing.bat
